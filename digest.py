@@ -225,6 +225,42 @@ def build_gemini_prompt(today_en, nl):
     )
 
 
+def build_gemini_prompt_from_rss(items, today_en, nl):
+    categories = "LLM|Продукти|Дослідження|Компанії|Агенти|Безпека"
+    news_lines = []
+    for i, item in enumerate(items, 1):
+        news_lines.append(
+            str(i)
+            + ". Title: "
+            + str(item.get("title", ""))
+            + nl
+            + "Source: "
+            + str(item.get("source", ""))
+            + nl
+            + "Link: "
+            + str(item.get("link", ""))
+        )
+
+    return (
+        "You are a Ukrainian AI news editor. Today is " + today_en + "." + nl
+        + "Below is a Google News RSS list. Select the "
+        + str(min(NEWS_COUNT, len(items)))
+        + " most relevant and non-duplicate AI news items, translate titles to Ukrainian, and write concise summaries."
+        + nl
+        + "Return ONLY valid JSON (no markdown):"
+        + nl
+        + '{"summary":"2-3 sentence overview in Ukrainian","news":['
+        + nl
+        + '{"title":"title in Ukrainian","category":"'
+        + categories
+        + '","importance":"high|medium|low","summary":"2-3 sentences in Ukrainian","source":"source name","why_matters":"1 sentence in Ukrainian"}]}'
+        + nl
+        + "RSS NEWS:"
+        + nl
+        + (nl + nl).join(news_lines)
+    )
+
+
 def build_gemini_message(data, today_uk):
     importance_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}
     category_icon = {
@@ -263,7 +299,7 @@ def build_gemini_message(data, today_uk):
             "",
         ]
 
-    lines += [sep, "🤖 Gemini · Google Search"]
+    lines += [sep, "🤖 Gemini · Google News RSS"]
     return "\n".join(lines)
 
 
@@ -333,14 +369,21 @@ def run_digest():
     send_telegram("⏳ Збираю AI-новини за " + escape_text(today_uk) + "...")
 
     nl = chr(10)
-    use_fallback = False
+    items = []
+    try:
+        items = get_rss_news()
+    except Exception as e:
+        print(f"RSS fetch failed before Gemini formatting: {e}")
+
     if not GEMINI_API_KEY:
-        print("GEMINI_API_KEY is not set. Falling back to RSS.")
-        use_fallback = True
+        print("GEMINI_API_KEY is not set. Sending RSS fallback.")
     else:
         try:
+            if not items:
+                raise RuntimeError("No RSS items available for Gemini formatting")
+
             client = genai.Client(api_key=GEMINI_API_KEY)
-            resp = gemini_call(client, build_gemini_prompt(today_en, nl), use_search=True)
+            resp = gemini_call(client, build_gemini_prompt_from_rss(items, today_en, nl), use_search=False)
             raw = resp.text.replace("```json", "").replace("```", "").strip()
 
             try:
@@ -367,26 +410,23 @@ def run_digest():
 
         except Exception as e:
             print(f"Gemini execution failed: {e}. Falling back to RSS...")
-            use_fallback = True
 
-    if use_fallback:
-        try:
-            items = get_rss_news()
-            if not items:
-                send_telegram(
-                    "☀️ <b>Дайджест новин ШІ</b> · "
-                    + escape_text(today_uk)
-                    + "\n\nНе вдалося знайти свіжих новин на даний момент."
-                )
-                return
-
-            send_telegram(build_rss_message(items, today_uk))
-            print("Done via Fallback RSS!")
-        except Exception as err:
-            print(f"Fallback also failed: {err}")
+    try:
+        if not items:
             send_telegram(
-                "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS."
+                "☀️ <b>Дайджест новин ШІ</b> · "
+                + escape_text(today_uk)
+                + "\n\nНе вдалося знайти свіжих новин на даний момент."
             )
+            return
+
+        send_telegram(build_rss_message(items, today_uk))
+        print("Done via Fallback RSS!")
+    except Exception as err:
+        print(f"Fallback also failed: {err}")
+        send_telegram(
+            "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS."
+        )
 
 
 def main():
