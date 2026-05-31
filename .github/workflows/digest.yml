@@ -1,11 +1,27 @@
 name: AI Digest
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: '0 5,6 * * *'
   workflow_dispatch:
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m compileall digest.py tests
+      - run: python -m unittest discover -s tests
+
   digest:
     runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'push'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
