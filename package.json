@@ -1,0 +1,16 @@
+{
+  "name": "ai-news-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot that sends daily AI news digests translated and summarized by Gemini",
+  "main": "bot.js",
+  "type": "module",
+  "scripts": {
+    "start": "node bot.js",
+    "test": "node bot.js --run-once"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "rss-parser": "^3.13.0"
+  }
+}

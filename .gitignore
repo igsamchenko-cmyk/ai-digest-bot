@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Configuration
+.env
+
+# Node (in case they have node_modules left)
+node_modules/
+package-lock.json
