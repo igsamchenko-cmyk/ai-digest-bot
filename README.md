@@ -82,3 +82,15 @@ python -m unittest discover -s tests
 ```
 
 Ці перевірки ловлять синтаксичні помилки, проблеми HTML-форматування Telegram-повідомлень і розбиття довгих дайджестів.
+
+---
+
+## 📰 Актуальність новин
+
+Бот фільтрує RSS-новини за датою публікації. За замовчуванням беруться лише матеріали за останні `72` години:
+
+```ini
+NEWS_LOOKBACK_HOURS=72
+```
+
+Пошук пріоритезує релізи моделей, оновлення LLM, конкурентні запуски та важливі AI-продукти від OpenAI, Anthropic/Claude, Google/Gemini, Meta/Llama, Mistral, DeepSeek, Qwen, xAI/Grok, Microsoft і Perplexity.

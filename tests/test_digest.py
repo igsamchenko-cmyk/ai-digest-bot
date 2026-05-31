@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import digest
@@ -27,6 +28,7 @@ class DigestFormattingTests(unittest.TestCase):
                     "title": "OpenAI <launch> & update",
                     "source": "Tech <News>",
                     "link": 'https://example.com/news?q=ai&tag="llm"',
+                    "published_at": datetime(2026, 5, 31, 12, 30, tzinfo=timezone.utc),
                 }
             ],
             "May 31, 2026",
@@ -34,6 +36,7 @@ class DigestFormattingTests(unittest.TestCase):
 
         self.assertIn("OpenAI &lt;launch&gt; &amp; update", message)
         self.assertIn("Tech &lt;News&gt;", message)
+        self.assertIn("31.05", message)
         self.assertIn("q=ai&amp;tag=&quot;llm&quot;", message)
         self.assertNotIn("OpenAI <launch>", message)
 
@@ -85,6 +88,11 @@ class DigestFormattingTests(unittest.TestCase):
         with patch.dict("os.environ", {"GEMINI_MODEL": "custom-model"}):
             self.assertEqual(digest.gemini_model_candidates()[0], "custom-model")
             self.assertIn("gemini-2.5-flash-lite", digest.gemini_model_candidates())
+
+    def test_parse_rss_datetime(self):
+        parsed = digest.parse_rss_datetime("Sun, 31 May 2026 12:30:00 GMT")
+
+        self.assertEqual(parsed, datetime(2026, 5, 31, 12, 30, tzinfo=timezone.utc))
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
@@ -42,6 +44,7 @@ def load_env_manually():
 load_env_manually()
 
 NEWS_COUNT = int(os.environ.get("NEWS_COUNT", "5"))
+NEWS_LOOKBACK_HOURS = int(os.environ.get("NEWS_LOOKBACK_HOURS", "72"))
 TOPIC = os.environ.get(
     "DIGEST_TOPIC",
     "artificial intelligence, LLM models, AI companies, machine learning, new AI releases",
@@ -189,32 +192,86 @@ def gemini_call(client, contents, use_search=False, max_retries=3):
     raise RuntimeError("Gemini: all model candidates failed; last error: " + str(last_error))
 
 
+def rss_queries():
+    return [
+        '("AI model" OR "language model" OR LLM) (released OR launches OR announced OR update OR benchmark) when:3d',
+        '(OpenAI OR ChatGPT OR GPT OR "GPT-5" OR "GPT-4.1") (model OR release OR update OR launch) when:3d',
+        '(Anthropic OR Claude) (model OR release OR update OR launch OR benchmark) when:3d',
+        '(Google OR Gemini OR DeepMind) (AI model OR release OR update OR launch) when:3d',
+        '(Meta OR Llama OR Mistral OR DeepSeek OR Qwen OR xAI OR Grok) (model OR release OR update OR launch) when:3d',
+        '(Microsoft Copilot OR Perplexity OR "AI agent" OR "coding agent") (release OR update OR launch) when:3d',
+    ]
+
+
+def rss_urls():
+    urls = []
+    for query in rss_queries():
+        encoded = quote_plus(query)
+        urls.append(f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en")
+    return urls
+
+
+def parse_rss_datetime(value):
+    if not value:
+        return None
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def item_sort_time(item):
+    return item.get("published_at") or datetime.min.replace(tzinfo=timezone.utc)
+
+
 def get_rss_news():
     print("Fetching news from Google News RSS feed...")
-    url = "https://news.google.com/rss/search?q=ChatGPT+OR+Claude+OR+Gemini+OR+OpenAI+OR+Copilot+OR+Google+AI&hl=uk&gl=UA&ceid=UA:uk"
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-
-    root = ET.fromstring(response.content)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=NEWS_LOOKBACK_HOURS)
     items = []
     seen_links = set()
-    for item in root.findall(".//item"):
-        title_elem = item.find("title")
-        link_elem = item.find("link")
-        if title_elem is None or link_elem is None or not title_elem.text or not link_elem.text:
+
+    for url in rss_urls():
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            print(f"RSS feed failed: {e}")
             continue
 
-        link = link_elem.text
-        if link in seen_links:
-            continue
-        seen_links.add(link)
+        root = ET.fromstring(response.content)
+        for item in root.findall(".//item"):
+            title_elem = item.find("title")
+            link_elem = item.find("link")
+            published_elem = item.find("pubDate")
+            if title_elem is None or link_elem is None or not title_elem.text or not link_elem.text:
+                continue
 
-        source_elem = item.find("source")
-        source = source_elem.text if source_elem is not None and source_elem.text else "Google News"
-        items.append({"title": title_elem.text, "link": link, "source": source})
-        if len(items) >= 10:
-            break
-    return items
+            published_at = parse_rss_datetime(published_elem.text if published_elem is not None else None)
+            if published_at and published_at < cutoff:
+                continue
+
+            link = link_elem.text
+            if link in seen_links:
+                continue
+            seen_links.add(link)
+
+            source_elem = item.find("source")
+            source = source_elem.text if source_elem is not None and source_elem.text else "Google News"
+            items.append(
+                {
+                    "title": title_elem.text,
+                    "link": link,
+                    "source": source,
+                    "published_at": published_at,
+                }
+            )
+
+    items.sort(key=item_sort_time, reverse=True)
+    print(f"Found {len(items)} RSS items from the last {NEWS_LOOKBACK_HOURS} hours.")
+    return items[: max(NEWS_COUNT * 3, 10)]
 
 
 def should_skip_scheduled_run(now):
@@ -251,6 +308,8 @@ def build_gemini_prompt_from_rss(items, today_en, nl):
     categories = "LLM|Продукти|Дослідження|Компанії|Агенти|Безпека"
     news_lines = []
     for i, item in enumerate(items, 1):
+        published = item.get("published_at")
+        published_text = published.isoformat() if published else "unknown"
         news_lines.append(
             str(i)
             + ". Title: "
@@ -259,15 +318,24 @@ def build_gemini_prompt_from_rss(items, today_en, nl):
             + "Source: "
             + str(item.get("source", ""))
             + nl
+            + "Published: "
+            + published_text
+            + nl
             + "Link: "
             + str(item.get("link", ""))
         )
 
     return (
         "You are a Ukrainian AI news editor. Today is " + today_en + "." + nl
-        + "Below is a Google News RSS list. Select the "
+        + "Below is a Google News RSS list filtered to the last "
+        + str(NEWS_LOOKBACK_HOURS)
+        + " hours. Select the "
         + str(min(NEWS_COUNT, len(items)))
-        + " most relevant and non-duplicate AI news items, translate titles to Ukrainian, and write concise summaries."
+        + " most relevant, fresh, and non-duplicate AI news items. Prioritize model releases, major product launches, benchmark-leading models, and competitive moves by OpenAI, Anthropic, Google/Gemini, Meta/Llama, Mistral, DeepSeek, Qwen, xAI/Grok, Microsoft, and Perplexity."
+        + nl
+        + "Reject evergreen articles, explainers, old announcements, rumors without source substance, and anything that appears older than the published timestamp window."
+        + nl
+        + "Translate titles to Ukrainian and write concise summaries."
         + nl
         + "Return ONLY valid JSON (no markdown):"
         + nl
@@ -335,9 +403,11 @@ def build_rss_message(items, today_uk):
     ]
 
     for i, item in enumerate(items, 1):
+        published = item.get("published_at")
+        published_label = published.astimezone(KYIV_TZ).strftime("%d.%m %H:%M") if published else "свіже"
         lines += [
             f"📰 <b>{i}. {escape_text(item['title'])}</b>",
-            f"🔗 <a href=\"{escape_attr(item['link'])}\">Читати на {escape_text(item['source'])}</a>",
+            f"🕒 {escape_text(published_label)} · <a href=\"{escape_attr(item['link'])}\">Читати на {escape_text(item['source'])}</a>",
             "",
         ]
 
