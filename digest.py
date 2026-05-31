@@ -60,13 +60,37 @@ def escape_attr(value):
 
 
 def require_telegram_config():
-    missing = []
     if not TELEGRAM_BOT_TOKEN:
-        missing.append("TELEGRAM_BOT_TOKEN")
-    if not TELEGRAM_CHAT_ID:
-        missing.append("TELEGRAM_CHAT_ID")
-    if missing:
-        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+        raise RuntimeError("Missing required environment variable: TELEGRAM_BOT_TOKEN")
+
+
+def resolve_telegram_chat_id():
+    if TELEGRAM_CHAT_ID:
+        return TELEGRAM_CHAT_ID
+
+    require_telegram_config()
+    url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getUpdates"
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+    if not data.get("ok"):
+        raise RuntimeError("Telegram getUpdates failed: " + str(data))
+
+    for update in reversed(data.get("result", [])):
+        message = update.get("message") or update.get("edited_message") or update.get("channel_post")
+        if not message:
+            continue
+        chat = message.get("chat", {})
+        chat_id = chat.get("id")
+        if chat_id:
+            resolved = str(chat_id)
+            print("Resolved TELEGRAM_CHAT_ID from getUpdates: " + resolved)
+            return resolved
+
+    raise RuntimeError(
+        "TELEGRAM_CHAT_ID is not set and getUpdates has no messages. "
+        "Open your Telegram bot, send /start or any message, then re-run the workflow."
+    )
 
 
 def split_message(text, limit=TELEGRAM_LIMIT):
@@ -99,13 +123,13 @@ def split_message(text, limit=TELEGRAM_LIMIT):
 
 
 def send_telegram(text):
-    require_telegram_config()
+    chat_id = resolve_telegram_chat_id()
     url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage"
     for part in split_message(text):
         requests.post(
             url,
             json={
-                "chat_id": TELEGRAM_CHAT_ID,
+                "chat_id": chat_id,
                 "text": part,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,

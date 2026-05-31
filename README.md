@@ -35,7 +35,7 @@
 3. Відкрийте вкладку **Settings** -> **Secrets and variables** -> **Actions** -> **New repository secret**.
 4. Додайте три секрети:
    * Назва: `TELEGRAM_BOT_TOKEN` | Значення: ваш токен з BotFather
-   * Назва: `TELEGRAM_CHAT_ID` | Значення: ваш Telegram chat ID
+   * Назва: `TELEGRAM_CHAT_ID` | Значення: ваш Telegram chat ID *(необов'язково, якщо ви вже написали боту `/start`; скрипт спробує визначити ID автоматично)*
    * Назва: `GEMINI_API_KEY` | Значення: ваш ключ Gemini API
 5. Перейдіть на вкладку **Actions** у вашому GitHub-репозиторії, оберіть **AI Digest** і натисніть **Run workflow**, щоб перевірити роботу бота вручну.
 

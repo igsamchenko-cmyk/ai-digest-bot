@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock, patch
 
 import digest
 
@@ -58,6 +59,27 @@ class DigestFormattingTests(unittest.TestCase):
         self.assertIn("Title &lt;bad&gt;", message)
         self.assertIn("Source &lt;A&gt;", message)
         self.assertIn("Because &gt; now", message)
+
+    def test_resolve_telegram_chat_id_from_updates(self):
+        response = Mock()
+        response.json.return_value = {
+            "ok": True,
+            "result": [
+                {"message": {"chat": {"id": 12345}}},
+                {"message": {"chat": {"id": 67890}}},
+            ],
+        }
+        response.raise_for_status.return_value = None
+
+        with patch.object(digest, "TELEGRAM_CHAT_ID", ""), patch.object(
+            digest, "TELEGRAM_BOT_TOKEN", "token"
+        ), patch("digest.requests.get", return_value=response):
+            self.assertEqual(digest.resolve_telegram_chat_id(), "67890")
+
+    def test_resolve_telegram_chat_id_prefers_env_value(self):
+        with patch.object(digest, "TELEGRAM_CHAT_ID", "555"), patch("digest.requests.get") as get:
+            self.assertEqual(digest.resolve_telegram_chat_id(), "555")
+            get.assert_not_called()
 
 
 if __name__ == "__main__":
