@@ -27,9 +27,9 @@ def load_env_manually():
 
 load_env_manually()
 
-GOOGLE_API_KEY     = os.environ.get("GOOGLE_API_KEY", "")
-TELEGRAM_BOT_TOKEN = "8917147406:AAGmWQrdtaGsPMokjcMS2YEf1QYXscfYPpU"
-TELEGRAM_CHAT_ID   = "1039798805"
+GOOGLE_API_KEY     = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 TOPIC      = "artificial intelligence, LLM models, AI companies, machine learning, new AI releases"
 NEWS_COUNT = 5
 

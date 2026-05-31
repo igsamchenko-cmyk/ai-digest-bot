@@ -32,12 +32,14 @@
 2. Перейдіть до вашого репозиторію на сайті GitHub.
 3. Відкрийте вкладку **Settings** -> **Secrets and variables** -> **Actions** -> **New repository secret**.
 4. Додайте три секрети:
-   * Назва: `TELEGRAM_BOT_TOKEN` | Значення: `8917147406:AAGmWQrdtaGsPMokjcMS2YEf1QYXscfYPpU`
-   * Назва: `TELEGRAM_CHAT_ID` | Значення: `1039798805`
-   * Назва: `GEMINI_API_KEY` | Значення: `AQ.Ab8RN6ISB_cL1bEucLFp49PPtgdO2WeNMGJz5XDbgPC2hBGDxw` *(або ваш новий робочий ключ Gemini API)*
+   * Назва: `TELEGRAM_BOT_TOKEN` | Значення: ваш токен з BotFather
+   * Назва: `TELEGRAM_CHAT_ID` | Значення: ваш Telegram chat ID
+   * Назва: `GEMINI_API_KEY` | Значення: ваш ключ Gemini API
 5. Перейдіть на вкладку **Actions** у вашому GitHub-репозиторії, оберіть **Daily AI News Bot** (або **AI Digest**) і натисніть **Run workflow**, щоб перевірити роботу бота вручну.
 
-Бот запускатиметься автоматично щодня о **08:00 за київським часом** (05:00 UTC).
+> Ніколи не додавайте реальні токени або API-ключі в код чи README. Якщо ключ випадково потрапив у публічний репозиторій, його потрібно одразу перевипустити.
+
+Бот запускатиметься автоматично щодня о **08:00 за київським часом**. Workflow має два UTC-запуски для літнього та зимового часу, а скрипт сам пропускає зайвий запуск.
 
 ---
 
@@ -53,9 +55,9 @@
    ```
 3. Створіть файл конфігурації `.env` на основі шаблону та пропишіть свої ключі:
    ```ini
-   TELEGRAM_BOT_TOKEN=8917147406:AAGmWQrdtaGsPMokjcMS2YEf1QYXscfYPpU
-   TELEGRAM_CHAT_ID=1039798805
-   GOOGLE_API_KEY=ваш_ключ_gemini
+   TELEGRAM_BOT_TOKEN=ваш_telegram_bot_token
+   TELEGRAM_CHAT_ID=ваш_telegram_chat_id
+   GEMINI_API_KEY=ваш_ключ_gemini
    ```
 4. Запустіть один раз для тестування:
    ```bash

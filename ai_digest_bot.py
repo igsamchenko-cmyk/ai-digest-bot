@@ -5,6 +5,7 @@ AI Дайджест — Telegram бот
 """
 
 import anthropic
+import os
 import requests
 import schedule
 import time
@@ -14,9 +15,9 @@ from datetime import datetime
 # ═══════════════════════════════════════════
 #  НАЛАШТУВАННЯ
 # ═══════════════════════════════════════════
-ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY"   #← вставити свій ключ
-TELEGRAM_BOT_TOKEN = "8917147406:AAGmWQrdtaGsPMokjcMS2YEf1QYXscfYPpU"
-TELEGRAM_CHAT_ID   = "1039798805"
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # Тема дайджесту (можна змінити)
 TOPIC = "штучний інтелект, LLM, нові AI моделі, AI компанії, машинне навчання"
