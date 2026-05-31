@@ -51,6 +51,22 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 
+def gemini_model_candidates():
+    configured = os.environ.get("GEMINI_MODEL", "").strip()
+    candidates = [
+        configured,
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+    ]
+    result = []
+    for model in candidates:
+        if model and model not in result:
+            result.append(model)
+    return result
+
+
 def escape_text(value):
     return html.escape(str(value or ""), quote=False)
 
@@ -144,27 +160,33 @@ def gemini_call(client, contents, use_search=False, max_retries=3):
         config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())]
         )
-    for attempt in range(max_retries):
-        try:
-            kwargs = {
-                "model": os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
-                "contents": contents,
-            }
-            if config:
-                kwargs["config"] = config
-            return client.models.generate_content(**kwargs)
-        except Exception as e:
-            err = str(e)
-            if "limit: 0" in err or "limit of 0" in err:
-                raise RuntimeError("Gemini API key has 0 quota limit")
 
-            if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                wait = 5 * (2**attempt)
-                print(f"Rate limit. Waiting {wait}s (attempt {attempt + 1}/{max_retries})...")
-                time.sleep(wait)
-            else:
-                raise
-    raise RuntimeError("Gemini: max retries exceeded")
+    last_error = None
+    for model in gemini_model_candidates():
+        print("Trying Gemini model: " + model)
+        for attempt in range(max_retries):
+            try:
+                kwargs = {"model": model, "contents": contents}
+                if config:
+                    kwargs["config"] = config
+                response = client.models.generate_content(**kwargs)
+                print("Gemini model succeeded: " + model)
+                return response
+            except Exception as e:
+                err = str(e)
+                last_error = e
+                if "limit: 0" in err or "limit of 0" in err:
+                    print("Gemini model has 0 quota, trying next model: " + model)
+                    break
+
+                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                    wait = 5 * (2**attempt)
+                    print(f"Rate limit on {model}. Waiting {wait}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(wait)
+                else:
+                    raise
+
+    raise RuntimeError("Gemini: all model candidates failed; last error: " + str(last_error))
 
 
 def get_rss_news():

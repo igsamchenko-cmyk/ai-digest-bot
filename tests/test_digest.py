@@ -81,6 +81,11 @@ class DigestFormattingTests(unittest.TestCase):
             self.assertEqual(digest.resolve_telegram_chat_id(), "555")
             get.assert_not_called()
 
+    def test_gemini_model_candidates_prefers_configured_model(self):
+        with patch.dict("os.environ", {"GEMINI_MODEL": "custom-model"}):
+            self.assertEqual(digest.gemini_model_candidates()[0], "custom-model")
+            self.assertIn("gemini-2.5-flash-lite", digest.gemini_model_candidates())
+
 
 if __name__ == "__main__":
     unittest.main()
