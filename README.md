@@ -1,6 +1,6 @@
 # 🤖 Telegram AI News Bot (Python)
 
-Цей бот автоматично збирає останні новини про штучний інтелект (ChatGPT, Claude, Gemini, Google, Copilot тощо), аналізує їх за допомогою **Gemini API** (з пошуком в реальному часі) і щоранку о 8:00 надсилає структурований дайджест українською мовою у ваш особисті повідомлення Telegram.
+Цей бот автоматично збирає останні новини про штучний інтелект (ChatGPT, Claude, Gemini, Google, Copilot тощо), аналізує їх за допомогою **Gemini API** (з пошуком в реальному часі) і щоранку о 8:00 надсилає структурований дайджест українською мовою у ваші особисті повідомлення Telegram.
 
 У разі обмежень квоти або помилок API, бот автоматично перемикається в **резервний режим (RSS)**, збираючи та відправляючи свіжі україномовні IT-новини напряму.
 
@@ -20,8 +20,7 @@
 
 Цей варіант дозволяє не тримати комп'ютер увімкненим. Сценарій запускається серверами GitHub щодня автоматично.
 
-1. Створіть новий репозиторій на GitHub (наприклад, `ai-digest-bot`).
-2. Залийте цей проект у створений репозиторій:
+1. Залийте цей проект у свій репозиторій на GitHub:
    ```bash
    git init
    git remote add origin https://github.com/igsamchenko-cmyk/ai-digest-bot.git
@@ -30,13 +29,13 @@
    git commit -m "Initial commit"
    git push -u origin main
    ```
-3. Перейдіть до репозиторію на сайті GitHub.
-4. Відкрийте вкладку **Settings** -> **Secrets and variables** -> **Actions** -> **New repository secret**.
-5. Додайте три секрети:
-   * Назва: `TELEGRAM_BOT_TOKEN` | Значення: *ваш токен бота*
-   * Назва: `TELEGRAM_CHAT_ID` | Значення: *ваш chat id*
-   * Назва: `GEMINI_API_KEY` | Значення: *ваш API-ключ Gemini*
-6. Перейдіть на вкладку **Actions** у вашому GitHub-репозиторії, оберіть **Daily AI News Bot** і натисніть **Run workflow**, щоб перевірити роботу бота вручну.
+2. Перейдіть до вашого репозиторію на сайті GitHub.
+3. Відкрийте вкладку **Settings** -> **Secrets and variables** -> **Actions** -> **New repository secret**.
+4. Додайте три секрети:
+   * Назва: `TELEGRAM_BOT_TOKEN` | Значення: `8917147406:AAGmWQrdtaGsPMokjcMS2YEf1QYXscfYPpU`
+   * Назва: `TELEGRAM_CHAT_ID` | Значення: `1039798805`
+   * Назва: `GEMINI_API_KEY` | Значення: `AQ.Ab8RN6ISB_cL1bEucLFp49PPtgdO2WeNMGJz5XDbgPC2hBGDxw` *(або ваш новий робочий ключ Gemini API)*
+5. Перейдіть на вкладку **Actions** у вашому GitHub-репозиторії, оберіть **Daily AI News Bot** (або **AI Digest**) і натисніть **Run workflow**, щоб перевірити роботу бота вручну.
 
 Бот запускатиметься автоматично щодня о **08:00 за київським часом** (05:00 UTC).
 
@@ -54,15 +53,15 @@
    ```
 3. Створіть файл конфігурації `.env` на основі шаблону та пропишіть свої ключі:
    ```ini
-   TELEGRAM_BOT_TOKEN=ваш_токен
-   TELEGRAM_CHAT_ID=ваш_chat_id
+   TELEGRAM_BOT_TOKEN=8917147406:AAGmWQrdtaGsPMokjcMS2YEf1QYXscfYPpU
+   TELEGRAM_CHAT_ID=1039798805
    GOOGLE_API_KEY=ваш_ключ_gemini
    ```
 4. Запустіть один раз для тестування:
    ```bash
-   python bot.py
+   python digest.py
    ```
 5. Для налаштування щоденного автозапуску у Windows скористайтеся **Планувальником завдань** (Task Scheduler):
    - Оберіть запуск програми: `python`
-   - Аргументи: `bot.py`
+   - Аргументи: `digest.py`
    - Робоча папка: повний шлях до каталогу бота.
