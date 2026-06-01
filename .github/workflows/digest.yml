@@ -4,6 +4,78 @@ on:
     branches:
       - main
   schedule:
+    # Кілька спроб у ранковому вікні, рознесені з нульової хвилини (вона найзавантаженіша
+    # на GitHub Actions і дає найбільші затримки). Літо (UTC+3): 05:xx UTC = 08:xx Київ;
+    # зима (UTC+2): 06:xx UTC = 08:xx Київ. Скрипт сам надсилає лише раз і лише у вікні 8–9 Київ.
+    - cron: '2,22,42 5,6,7 * * *'
+  workflow_dispatch:
+
+# Якщо кілька ранкових запусків накладаються (через затримки), виконуємо їх по черзі,
+# а не паралельно — щоб другий побачив маркер "вже надіслано" і не дублював.
+concurrency:
+  group: ai-digest
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m compileall digest.py tests
+      - run: python -m unittest discover -s tests
+
+  digest:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[run digest]')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+
+      # Відновлюємо маркер "вже надіслано сьогодні" з попереднього запуску.
+      - name: Restore send marker
+        uses: actions/cache/restore@v4
+        with:
+          path: .digest_last_sent
+          key: digest-sent-${{ github.run_id }}
+          restore-keys: |
+            digest-sent-
+
+      - run: python digest.py
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GOOGLE_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_ONCE: 'true'
+          ENFORCE_KYIV_HOUR: ${{ github.event_name == 'schedule' }}
+          TARGET_KYIV_HOUR_START: '8'
+          TARGET_KYIV_HOUR_END: '9'
+
+      # Гарантуємо, що файл існує (інакше крок збереження кешу впаде на першому запуску).
+      - name: Ensure marker file exists
+        if: always()
+        run: touch .digest_last_sent
+
+      # Зберігаємо маркер назад у кеш для наступних запусків.
+      - name: Save send marker
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .digest_last_sent
+          key: digest-sent-${{ github.run_id }}
+name: AI Digest
+on:
+  push:
+    branches:
+      - main
+  schedule:
     - cron: '0 5,6 * * *'
   workflow_dispatch:
 jobs:
