@@ -56,7 +56,7 @@ jobs:
           RUN_ONCE: 'true'
           ENFORCE_KYIV_HOUR: ${{ github.event_name == 'schedule' }}
           TARGET_KYIV_HOUR_START: '8'
-          TARGET_KYIV_HOUR_END: '9'
+          TARGET_KYIV_HOUR_END: '13'
 
       # Гарантуємо, що файл існує (інакше крок збереження кешу впаде на першому запуску).
       - name: Ensure marker file exists
