@@ -1,6 +1,7 @@
 import html
 import json
 import os
+import re
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -14,13 +15,14 @@ import schedule
 from google import genai
 from google.genai import types
 
-
 try:
     KYIV_TZ = ZoneInfo("Europe/Kyiv")
 except ZoneInfoNotFoundError:
     KYIV_TZ = timezone(timedelta(hours=3), name="Europe/Kyiv")
 
 TELEGRAM_LIMIT = 3900
+ATOM_NS = "{http://www.w3.org/2005/Atom}"
+HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ai-digest-bot/2.0)"}
 
 
 def load_env_manually():
@@ -29,7 +31,6 @@ def load_env_manually():
         if not os.path.exists(env_path):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             env_path = os.path.join(script_dir, ".env")
-
         if os.path.exists(env_path):
             with open(env_path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -45,13 +46,28 @@ load_env_manually()
 
 NEWS_COUNT = int(os.environ.get("NEWS_COUNT", "5"))
 NEWS_LOOKBACK_HOURS = int(os.environ.get("NEWS_LOOKBACK_HOURS", "72"))
-TOPIC = os.environ.get(
-    "DIGEST_TOPIC",
-    "artificial intelligence, LLM models, AI companies, machine learning, new AI releases",
-)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# --- Українські IT-видання (прямі RSS, чисті посилання на статті) ---
+UA_FEEDS = {
+    "DOU": "https://dou.ua/feed/",
+    "AIN.UA": "https://ain.ua/feed/",
+    "Mezha.Media": "https://mezha.media/feed/",
+    "ITC.ua": "https://itc.ua/feed/",
+    "dev.ua": "https://dev.ua/rss",
+    "SPEKA": "https://speka.media/feed",
+}
+
+# Фільтр AI-тематики для загальних україномовних стрічок
+AI_PATTERN = re.compile(
+    r"(штучн\w*\s+інтелект|нейромереж|нейронн\w*\s+мереж|машинн\w*\s+навчанн"
+    r"|\bші\b|\bai\b|openai|chatgpt|\bgpt-?[45o\d]|anthropic|claude|gemini|deepmind"
+    r"|\bllm\b|copilot|midjourney|mistral|deepseek|\bgrok\b|\bxai\b|perplexity"
+    r"|llama|qwen|stable diffusion|hugging face)",
+    re.IGNORECASE,
+)
 
 
 def gemini_model_candidates():
@@ -83,10 +99,16 @@ def require_telegram_config():
         raise RuntimeError("Missing required environment variable: TELEGRAM_BOT_TOKEN")
 
 
-def resolve_telegram_chat_id():
-    if TELEGRAM_CHAT_ID:
-        return TELEGRAM_CHAT_ID
+_CHAT_ID_CACHE = None
 
+
+def resolve_telegram_chat_id():
+    global _CHAT_ID_CACHE
+    if _CHAT_ID_CACHE:
+        return _CHAT_ID_CACHE
+    if TELEGRAM_CHAT_ID:
+        _CHAT_ID_CACHE = TELEGRAM_CHAT_ID
+        return _CHAT_ID_CACHE
     require_telegram_config()
     url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getUpdates"
     response = requests.get(url, timeout=30)
@@ -94,18 +116,15 @@ def resolve_telegram_chat_id():
     data = response.json()
     if not data.get("ok"):
         raise RuntimeError("Telegram getUpdates failed: " + str(data))
-
     for update in reversed(data.get("result", [])):
         message = update.get("message") or update.get("edited_message") or update.get("channel_post")
         if not message:
             continue
-        chat = message.get("chat", {})
-        chat_id = chat.get("id")
+        chat_id = message.get("chat", {}).get("id")
         if chat_id:
-            resolved = str(chat_id)
-            print("Resolved TELEGRAM_CHAT_ID from getUpdates: " + resolved)
-            return resolved
-
+            _CHAT_ID_CACHE = str(chat_id)
+            print("Resolved TELEGRAM_CHAT_ID from getUpdates: " + _CHAT_ID_CACHE)
+            return _CHAT_ID_CACHE
     raise RuntimeError(
         "TELEGRAM_CHAT_ID is not set and getUpdates has no messages. "
         "Open your Telegram bot, send /start or any message, then re-run the workflow."
@@ -115,7 +134,6 @@ def resolve_telegram_chat_id():
 def split_message(text, limit=TELEGRAM_LIMIT):
     if len(text) <= limit:
         return [text]
-
     chunks = []
     current = []
     current_len = 0
@@ -135,7 +153,6 @@ def split_message(text, limit=TELEGRAM_LIMIT):
         else:
             current.append(block)
             current_len += len(block)
-
     if current:
         chunks.append("".join(current))
     return chunks
@@ -157,12 +174,13 @@ def send_telegram(text):
         ).raise_for_status()
 
 
-def gemini_call(client, contents, use_search=False, max_retries=3):
-    config = None
+def gemini_call(client, contents, use_search=False, json_mode=False, max_retries=3):
+    config_kwargs = {}
     if use_search:
-        config = types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())]
-        )
+        config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+    if json_mode and not use_search:
+        config_kwargs["response_mime_type"] = "application/json"
+    config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
     last_error = None
     for model in gemini_model_candidates():
@@ -181,21 +199,21 @@ def gemini_call(client, contents, use_search=False, max_retries=3):
                 if "limit: 0" in err or "limit of 0" in err:
                     print("Gemini model has 0 quota, trying next model: " + model)
                     break
-
                 if "429" in err or "RESOURCE_EXHAUSTED" in err:
                     wait = 5 * (2**attempt)
                     print(f"Rate limit on {model}. Waiting {wait}s (attempt {attempt + 1}/{max_retries})...")
                     time.sleep(wait)
                 else:
                     raise
-
     raise RuntimeError("Gemini: all model candidates failed; last error: " + str(last_error))
 
 
-def rss_queries():
+# --- Збір новин ---
+
+def world_rss_queries():
     return [
         '("AI model" OR "language model" OR LLM) (released OR launches OR announced OR update OR benchmark) when:3d',
-        '(OpenAI OR ChatGPT OR GPT OR "GPT-5" OR "GPT-4.1") (model OR release OR update OR launch) when:3d',
+        '(OpenAI OR ChatGPT OR GPT) (model OR release OR update OR launch) when:3d',
         '(Anthropic OR Claude) (model OR release OR update OR launch OR benchmark) when:3d',
         '(Google OR Gemini OR DeepMind) (AI model OR release OR update OR launch) when:3d',
         '(Meta OR Llama OR Mistral OR DeepSeek OR Qwen OR xAI OR Grok) (model OR release OR update OR launch) when:3d',
@@ -203,76 +221,134 @@ def rss_queries():
     ]
 
 
-def rss_urls():
-    urls = []
-    for query in rss_queries():
-        encoded = quote_plus(query)
-        urls.append(f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en")
-    return urls
+def google_news_url(query, lang="en"):
+    encoded = quote_plus(query)
+    if lang == "uk":
+        return f"https://news.google.com/rss/search?q={encoded}&hl=uk&gl=UA&ceid=UA:uk"
+    return f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
 
 
-def parse_rss_datetime(value):
+def parse_feed_datetime(value):
     if not value:
         return None
+    parsed = None
     try:
         parsed = parsedate_to_datetime(value)
     except (TypeError, ValueError):
-        return None
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def parse_feed_items(content, default_source):
+    """Парсить RSS 2.0 та Atom. Повертає список словників."""
+    items = []
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as e:
+        print(f"Feed parse error ({default_source}): {e}")
+        return items
+    for item in root.findall(".//item"):
+        title = item.findtext("title")
+        link = item.findtext("link")
+        if not title or not link:
+            continue
+        source = item.findtext("source") or default_source
+        items.append(
+            {
+                "title": title.strip(),
+                "link": link.strip(),
+                "source": source.strip(),
+                "published_at": parse_feed_datetime(item.findtext("pubDate")),
+            }
+        )
+    for entry in root.findall(f".//{ATOM_NS}entry"):
+        title = entry.findtext(f"{ATOM_NS}title")
+        link_el = entry.find(f"{ATOM_NS}link")
+        link = link_el.get("href") if link_el is not None else None
+        if not title or not link:
+            continue
+        published = entry.findtext(f"{ATOM_NS}published") or entry.findtext(f"{ATOM_NS}updated")
+        items.append(
+            {
+                "title": title.strip(),
+                "link": link.strip(),
+                "source": default_source,
+                "published_at": parse_feed_datetime(published),
+            }
+        )
+    return items
+
+
+def normalize_title(title):
+    words = re.findall(r"\w+", (title or "").lower())
+    return " ".join(words[:10])
 
 
 def item_sort_time(item):
     return item.get("published_at") or datetime.min.replace(tzinfo=timezone.utc)
 
 
+def fetch_feed(url, default_source):
+    try:
+        response = requests.get(url, timeout=30, headers=HTTP_HEADERS)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Feed failed ({default_source}): {e}")
+        return []
+    return parse_feed_items(response.content, default_source)
+
+
 def get_rss_news():
-    print("Fetching news from Google News RSS feed...")
+    """Збирає новини: спершу українські джерела, потім світові (Google News)."""
+    print("Fetching news (UA feeds + Google News)...")
     cutoff = datetime.now(timezone.utc) - timedelta(hours=NEWS_LOOKBACK_HOURS)
-    items = []
     seen_links = set()
+    seen_titles = set()
+    ua_items = []
+    world_items = []
 
-    for url in rss_urls():
-        try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-        except requests.RequestException as e:
-            print(f"RSS feed failed: {e}")
-            continue
-
-        root = ET.fromstring(response.content)
-        for item in root.findall(".//item"):
-            title_elem = item.find("title")
-            link_elem = item.find("link")
-            published_elem = item.find("pubDate")
-            if title_elem is None or link_elem is None or not title_elem.text or not link_elem.text:
+    def add(raw_items, bucket, lang, require_keywords=False, require_date=False):
+        for it in raw_items:
+            published = it.get("published_at")
+            if require_date and not published:
                 continue
-
-            published_at = parse_rss_datetime(published_elem.text if published_elem is not None else None)
-            if published_at and published_at < cutoff:
+            if published and published < cutoff:
                 continue
-
-            link = link_elem.text
-            if link in seen_links:
+            if require_keywords and not AI_PATTERN.search(it["title"]):
                 continue
-            seen_links.add(link)
+            title_key = normalize_title(it["title"])
+            if it["link"] in seen_links or title_key in seen_titles:
+                continue
+            seen_links.add(it["link"])
+            seen_titles.add(title_key)
+            it["lang"] = lang
+            bucket.append(it)
 
-            source_elem = item.find("source")
-            source = source_elem.text if source_elem is not None and source_elem.text else "Google News"
-            items.append(
-                {
-                    "title": title_elem.text,
-                    "link": link,
-                    "source": source,
-                    "published_at": published_at,
-                }
-            )
+    # 1. Прямі стрічки українських видань (фільтруємо за AI-тематикою)
+    for source, url in UA_FEEDS.items():
+        add(fetch_feed(url, source), ua_items, "uk", require_keywords=True, require_date=True)
 
-    items.sort(key=item_sort_time, reverse=True)
-    print(f"Found {len(items)} RSS items from the last {NEWS_LOOKBACK_HOURS} hours.")
-    return items[: max(NEWS_COUNT * 3, 10)]
+    # 2. Google News українською
+    for query in ["штучний інтелект when:3d", "OpenAI OR ChatGPT OR Gemini OR Claude when:3d"]:
+        add(fetch_feed(google_news_url(query, "uk"), "Google News UA"), ua_items, "uk")
 
+    # 3. Світові новини (Google News, англійською)
+    for query in world_rss_queries():
+        add(fetch_feed(google_news_url(query, "en"), "Google News"), world_items, "en")
+
+    ua_items.sort(key=item_sort_time, reverse=True)
+    world_items.sort(key=item_sort_time, reverse=True)
+    items = ua_items + world_items
+    print(f"Found {len(ua_items)} UA + {len(world_items)} world items (last {NEWS_LOOKBACK_HOURS}h).")
+    return items[: max(NEWS_COUNT * 4, 12)]
+
+
+# --- Захист від повторної відправки ---
 
 SEND_MARKER_PATH = os.environ.get("SEND_MARKER_PATH", ".digest_last_sent")
 
@@ -302,46 +378,19 @@ def mark_sent_if_enforcing(now):
 def should_skip_scheduled_run(now):
     if not enforcing_window():
         return False
-
     start = int(os.environ.get("TARGET_KYIV_HOUR_START", os.environ.get("TARGET_KYIV_HOUR", "8")))
     end = int(os.environ.get("TARGET_KYIV_HOUR_END", str(start + 1)))
-
-    # Поза ранковим вікном — пропускаємо (резервні cron-запуски в інші години).
     if not (start <= now.hour <= end):
         print(f"Skipping scheduled run at Kyiv hour {now.hour}; send window is {start}-{end}.")
         return True
-
-    # Захист від повторної відправки: якщо сьогодні вже слали — пропускаємо.
     today = now.strftime("%Y-%m-%d")
     if read_send_marker() == today:
         print(f"Skipping scheduled run: digest already sent today ({today}).")
         return True
-
     return False
 
 
-def build_gemini_prompt(today_en, nl):
-    categories = "LLM|Продукти|Дослідження|Компанії|Агенти|Безпека"
-    return (
-        "You are an AI news curator. Today is " + today_en + "." + nl
-        + "1. Use Google Search to find the "
-        + str(NEWS_COUNT)
-        + " most important AI news from the last 24-48 hours about: "
-        + TOPIC
-        + nl
-        + "2. Return ONLY valid JSON (no markdown):"
-        + nl
-        + '{"summary":"2-3 sentence overview in Ukrainian","news":['
-        + nl
-        + '{"title":"title in Ukrainian","category":"'
-        + categories
-        + '",'
-        + nl
-        + '"importance":"high|medium|low","summary":"3-4 sentences in Ukrainian",'
-        + nl
-        + '"source":"source name","why_matters":"1 sentence in Ukrainian"}]}'
-    )
-
+# --- Gemini: відбір і переклад новин ---
 
 def build_gemini_prompt_from_rss(items, today_en, nl):
     categories = "LLM|Продукти|Дослідження|Компанії|Агенти|Безпека"
@@ -351,43 +400,55 @@ def build_gemini_prompt_from_rss(items, today_en, nl):
         published_text = published.isoformat() if published else "unknown"
         news_lines.append(
             str(i)
-            + ". Title: "
-            + str(item.get("title", ""))
-            + nl
-            + "Source: "
-            + str(item.get("source", ""))
-            + nl
-            + "Published: "
-            + published_text
-            + nl
-            + "Link: "
-            + str(item.get("link", ""))
+            + ". Title: " + str(item.get("title", ""))
+            + nl + "Source: " + str(item.get("source", ""))
+            + nl + "Language: " + str(item.get("lang", "en"))
+            + nl + "Published: " + published_text
         )
-
     return (
         "You are a Ukrainian AI news editor. Today is " + today_en + "." + nl
-        + "Below is a Google News RSS list filtered to the last "
+        + "Below is a numbered list of news items from the last "
         + str(NEWS_LOOKBACK_HOURS)
         + " hours. Select the "
         + str(min(NEWS_COUNT, len(items)))
-        + " most relevant, fresh, and non-duplicate AI news items. Prioritize model releases, major product launches, benchmark-leading models, and competitive moves by OpenAI, Anthropic, Google/Gemini, Meta/Llama, Mistral, DeepSeek, Qwen, xAI/Grok, Microsoft, and Perplexity."
+        + " most relevant, fresh, non-duplicate AI news items. Prioritize model releases, major product launches, benchmarks, and competitive moves by OpenAI, Anthropic, Google/Gemini, Meta/Llama, Mistral, DeepSeek, Qwen, xAI/Grok, Microsoft, Perplexity."
         + nl
-        + "Reject evergreen articles, explainers, old announcements, rumors without source substance, and anything that appears older than the published timestamp window."
+        + "When two items cover the same story, prefer the one with Language: uk (Ukrainian source)."
         + nl
-        + "Translate titles to Ukrainian and write concise summaries."
+        + "Reject evergreen articles, explainers, old announcements, and rumors without substance."
         + nl
-        + "Return ONLY valid JSON (no markdown):"
+        + "Translate titles to Ukrainian and write concise summaries in Ukrainian."
+        + nl
+        + 'Return ONLY valid JSON (no markdown). The "id" field MUST be the exact number of the item in the list below — never invent it:'
         + nl
         + '{"summary":"2-3 sentence overview in Ukrainian","news":['
         + nl
-        + '{"title":"title in Ukrainian","category":"'
-        + categories
-        + '","importance":"high|medium|low","summary":"2-3 sentences in Ukrainian","source":"source name","why_matters":"1 sentence in Ukrainian"}]}'
+        + '{"id":1,"title":"заголовок українською","category":"' + categories + '",'
+        + '"importance":"high|medium|low","summary":"2-3 sentences in Ukrainian",'
+        + '"why_matters":"1 sentence in Ukrainian"}]}'
         + nl
-        + "RSS NEWS:"
+        + "NEWS LIST:"
         + nl
         + (nl + nl).join(news_lines)
     )
+
+
+def attach_links(data, items):
+    """Підставляє реальні посилання та джерела за id — Gemini ніколи не генерує URL сам."""
+    enriched = []
+    for n in data.get("news", []):
+        try:
+            idx = int(n.get("id", 0)) - 1
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(items):
+            n["link"] = items[idx]["link"]
+            n["source"] = items[idx]["source"]
+            enriched.append(n)
+    if not enriched:
+        raise RuntimeError("Gemini response had no valid item ids")
+    data["news"] = enriched
+    return data
 
 
 def build_gemini_message(data, today_uk):
@@ -407,28 +468,23 @@ def build_gemini_message(data, today_uk):
         "<i>" + escape_text(data.get("summary", "")) + "</i>",
         "",
     ]
-
     for i, item in enumerate(data.get("news", []), 1):
         importance = item.get("importance", "medium")
         category = item.get("category", "")
+        title_html = escape_text(item.get("title", ""))
+        link = item.get("link", "")
+        if link:
+            title_html = '<a href="' + escape_attr(link) + '">' + title_html + "</a>"
         lines += [
-            importance_icon.get(importance, "⚪")
-            + " <b>"
-            + str(i)
-            + ". "
-            + escape_text(item.get("title", ""))
-            + "</b>",
+            importance_icon.get(importance, "⚪") + " <b>" + str(i) + ". " + title_html + "</b>",
             category_icon.get(category, "📌")
-            + " <code>"
-            + escape_text(category)
-            + "</code>  //  "
+            + " <code>" + escape_text(category) + "</code> // "
             + escape_text(item.get("source", "")),
             escape_text(item.get("summary", "")),
             "💡 <i>" + escape_text(item.get("why_matters", "")) + "</i>",
             "",
         ]
-
-    lines += [sep, "🤖 Gemini · Google News RSS"]
+    lines += [sep, "🤖 Gemini · UA RSS + Google News"]
     return "\n".join(lines)
 
 
@@ -437,11 +493,10 @@ def build_rss_message(items, today_uk):
     lines = [
         "⚡ <b>AI Дайджест (резервний)</b> · " + escape_text(today_uk),
         sep,
-        "<i>Gemini зараз недоступний або ключ не налаштований. Надсилаю свіжі новини з Google News RSS.</i>",
+        "<i>Gemini зараз недоступний. Надсилаю свіжі новини напряму з RSS.</i>",
         "",
     ]
-
-    for i, item in enumerate(items, 1):
+    for i, item in enumerate(items[:NEWS_COUNT * 2], 1):
         published = item.get("published_at")
         published_label = published.astimezone(KYIV_TZ).strftime("%d.%m %H:%M") if published else "свіже"
         lines += [
@@ -449,39 +504,18 @@ def build_rss_message(items, today_uk):
             f"🕒 {escape_text(published_label)} · <a href=\"{escape_attr(item['link'])}\">Читати на {escape_text(item['source'])}</a>",
             "",
         ]
-
-    lines += [sep, "📡 Google News RSS Feed"]
+    lines += [sep, "📡 RSS Feed"]
     return "\n".join(lines)
 
 
 def date_labels(now):
     months_uk = [
-        "січня",
-        "лютого",
-        "березня",
-        "квітня",
-        "травня",
-        "червня",
-        "липня",
-        "серпня",
-        "вересня",
-        "жовтня",
-        "листопада",
-        "грудня",
+        "січня", "лютого", "березня", "квітня", "травня", "червня",
+        "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
     ]
     months_en = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
     ]
     return (
         f"{now.day} {months_uk[now.month - 1]} {now.year}",
@@ -492,54 +526,33 @@ def date_labels(now):
 def run_digest():
     now = datetime.now(KYIV_TZ)
     if should_skip_scheduled_run(now):
-        print(f"Skipping scheduled run at Kyiv hour {now.hour}; target is {os.environ.get('TARGET_KYIV_HOUR', '8')}.")
         return
-
     today_uk, today_en = date_labels(now)
     print("Starting digest for " + today_en + "...")
-    send_telegram("⏳ Збираю AI-новини за " + escape_text(today_uk) + "...")
-
     nl = chr(10)
+
     items = []
     try:
         items = get_rss_news()
     except Exception as e:
-        print(f"RSS fetch failed before Gemini formatting: {e}")
+        print(f"RSS fetch failed: {e}")
 
     if not GEMINI_API_KEY:
         print("GEMINI_API_KEY is not set. Sending RSS fallback.")
-    else:
+    elif items:
         try:
-            if not items:
-                raise RuntimeError("No RSS items available for Gemini formatting")
-
             client = genai.Client(api_key=GEMINI_API_KEY)
-            resp = gemini_call(client, build_gemini_prompt_from_rss(items, today_en, nl), use_search=False)
-            raw = resp.text.replace("```json", "").replace("```", "").strip()
-
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                print("Not JSON, reformatting...")
-                fmt_prompt = (
-                    "Format these AI news into JSON for today "
-                    + today_uk
-                    + " in Ukrainian."
-                    + nl
-                    + "NEWS: "
-                    + raw
-                    + nl
-                    + 'Return ONLY: {"summary":"...","news":[{"title":"...","category":"...","importance":"high|medium|low","summary":"...","source":"...","why_matters":"..."}]}'
-                )
-                fmt = gemini_call(client, fmt_prompt, use_search=False)
-                raw2 = fmt.text.replace("```json", "").replace("```", "").strip()
-                data = json.loads(raw2)
-
+            resp = gemini_call(
+                client,
+                build_gemini_prompt_from_rss(items, today_en, nl),
+                json_mode=True,
+            )
+            raw = (resp.text or "").replace("```json", "").replace("```", "").strip()
+            data = attach_links(json.loads(raw), items)
             send_telegram(build_gemini_message(data, today_uk))
             mark_sent_if_enforcing(now)
             print("Done via Gemini!")
             return
-
         except Exception as e:
             print(f"Gemini execution failed: {e}. Falling back to RSS...")
 
@@ -552,15 +565,12 @@ def run_digest():
             )
             mark_sent_if_enforcing(now)
             return
-
         send_telegram(build_rss_message(items, today_uk))
         mark_sent_if_enforcing(now)
         print("Done via Fallback RSS!")
     except Exception as err:
         print(f"Fallback also failed: {err}")
-        send_telegram(
-            "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS."
-        )
+        send_telegram("⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS.")
 
 
 def main():
@@ -570,15 +580,12 @@ def main():
         run_digest()
         print("One-shot run complete.")
         return
-
     send_time = os.environ.get("SEND_TIME", "08:00")
     print(f"Starting in scheduler mode. Daily digest time: {send_time}")
     try:
         send_telegram(f"✅ Бот запущено в режимі демона. Дайджест надходитиме щодня о {escape_text(send_time)}.")
-        print("Startup notification sent successfully.")
     except Exception as e:
         print(f"Startup Telegram notification failed: {e}")
-
     schedule.every().day.at(send_time).do(run_digest)
     while True:
         schedule.run_pending()
