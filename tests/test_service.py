@@ -20,23 +20,33 @@ from ai_digest.digest.service import DigestService, run_digest_service
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _cfg(**overrides) -> AppConfig:
+def _cfg(
+    telegram_bot_token: str = "BOT_TOKEN",
+    telegram_chat_id: str = "-100123",
+    gemini_api_key: str = "GEMINI_KEY",
+    news_count: int = 5,
+    news_lookback_hours: int = 72,
+    gemini_model: str = "",
+    send_marker_path: str = ".test_marker_service",
+    enforce_kyiv_hour: bool = False,
+    target_kyiv_hour_start: int = 8,
+    target_kyiv_hour_end: int = 9,
+    send_time: str = "08:00",
+) -> AppConfig:
     """Build an AppConfig suitable for unit tests."""
-    defaults = dict(
-        telegram_bot_token="BOT_TOKEN",
-        telegram_chat_id="-100123",
-        gemini_api_key="GEMINI_KEY",
-        news_count=5,
-        news_lookback_hours=72,
-        gemini_model="",
-        send_marker_path=".test_marker_service",
-        enforce_kyiv_hour=False,
-        target_kyiv_hour_start=8,
-        target_kyiv_hour_end=9,
-        send_time="08:00",
+    return AppConfig(
+        telegram_bot_token=telegram_bot_token,
+        telegram_chat_id=telegram_chat_id,
+        gemini_api_key=gemini_api_key,
+        news_count=news_count,
+        news_lookback_hours=news_lookback_hours,
+        gemini_model=gemini_model,
+        send_marker_path=send_marker_path,
+        enforce_kyiv_hour=enforce_kyiv_hour,
+        target_kyiv_hour_start=target_kyiv_hour_start,
+        target_kyiv_hour_end=target_kyiv_hour_end,
+        send_time=send_time,
     )
-    defaults.update(overrides)
-    return AppConfig(**defaults)
 
 
 _SAMPLE_ITEMS = [
@@ -62,6 +72,27 @@ _SAMPLE_ITEMS = [
 
 class TestDigestServiceHappyPath(unittest.TestCase):
     """run() completes the Gemini path and calls send_telegram once."""
+
+    def test_model_override_comes_from_config(self):
+        """DigestService.run() must pass cfg.gemini_model as model_override to gemini_call."""
+        cfg = _cfg(gemini_model="my-custom-model")
+        svc = DigestService(cfg)
+
+        mock_resp = Mock()
+        mock_resp.text = '{"summary": "s", "news": [{"id": 1, "title": "T", "category": "LLM", "importance": "high", "summary": "S", "source": "X", "why_matters": "W"}]}'
+
+        with (
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=_SAMPLE_ITEMS),
+            patch("ai_digest.digest.service.genai"),
+            patch("ai_digest.digest.service.gemini_call", return_value=mock_resp) as mock_call,
+            patch("ai_digest.digest.service.send_telegram"),
+            patch.object(svc, "mark_sent_if_enforcing"),
+        ):
+            svc.run()
+
+        _, kwargs = mock_call.call_args
+        self.assertEqual(kwargs.get("model_override"), "my-custom-model")
 
     def test_gemini_path_calls_send_telegram_once(self):
         cfg = _cfg()

@@ -39,8 +39,12 @@ def gemini_call(
     use_search: bool = False,
     json_mode: bool = False,
     max_retries: int = 3,
+    model_override: str = "",
 ):
     """Call Gemini with automatic model fallback and retry on quota/rate errors.
+
+    *model_override* is forwarded to gemini_model_candidates(); if empty, the
+    function falls back to the GEMINI_MODEL env var (backward-compat default).
 
     Tries each candidate model in order:
       - "limit: 0" / "limit of 0" → model has zero quota; skip to next model.
@@ -57,7 +61,7 @@ def gemini_call(
     gen_config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
     last_error: Exception | None = None
-    for model in gemini_model_candidates():
+    for model in gemini_model_candidates(model_override):
         logger.info("Trying Gemini model: %s", model)
         for attempt in range(max_retries):
             try:

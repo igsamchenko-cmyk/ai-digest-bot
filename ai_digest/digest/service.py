@@ -121,6 +121,7 @@ class DigestService:
                         news_count=cfg.news_count,
                     ),
                     json_mode=True,
+                    model_override=cfg.gemini_model,
                 )
                 data = attach_links(parse_gemini_response(resp.text), items)
                 send_telegram(

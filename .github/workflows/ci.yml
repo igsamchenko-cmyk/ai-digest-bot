@@ -30,7 +30,7 @@ jobs:
         run: black --check .
 
       - name: Type check (mypy)
-        run: mypy ai_digest
+        run: mypy ai_digest digest.py
 
       - name: Security audit (pip-audit)
         run: pip-audit -r requirements.txt

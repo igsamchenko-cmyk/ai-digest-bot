@@ -262,6 +262,25 @@ class TestGeminiCall(unittest.TestCase):
             c.models.generate_content.return_value = return_value or Mock()
         return c
 
+    # ── model_override forwarding ─────────────────────────────────────────
+
+    def test_model_override_forwarded_to_candidates(self):
+        """gemini_call must pass model_override to gemini_model_candidates."""
+        client = self._client(return_value=Mock())
+        with patch(self._MODELS_PATCH) as mock_candidates:
+            mock_candidates.return_value = ["cfg-model"]
+            gemini_call(client, "p", model_override="cfg-model")
+        mock_candidates.assert_called_once_with("cfg-model")
+
+    def test_empty_model_override_still_works(self):
+        """Default empty model_override must not break existing behavior."""
+        mock_resp = Mock()
+        client = self._client(return_value=mock_resp)
+        with patch(self._MODELS_PATCH, return_value=self._MODELS) as mock_candidates:
+            result = gemini_call(client, "prompt")
+        mock_candidates.assert_called_once_with("")
+        self.assertIs(result, mock_resp)
+
     # ── success paths ──────────────────────────────────────────────────────
 
     def test_success_returns_response(self):

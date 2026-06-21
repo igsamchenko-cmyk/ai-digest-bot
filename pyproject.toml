@@ -39,6 +39,7 @@ python_version = "3.11"
 warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = false
+exclude = ["archive/"]
 
 [[tool.mypy.overrides]]
 module = "ai_digest.*"
