@@ -12,12 +12,9 @@ logic to ai_digest/digest/service.py (DigestService). This file:
 """
 
 import json  # noqa: F401 — kept for callers that imported json via digest
-import os
-import sys
 import time  # noqa: F401
 from datetime import datetime  # noqa: F401 — re-exported for callers
 
-import schedule
 from google import genai  # noqa: F401 — re-exported
 
 # ── Telegram layer ────────────────────────────────────────────────────────────
@@ -33,6 +30,7 @@ from ai_digest.ai.parser import (
     parse_gemini_response,  # noqa: F401
 )
 from ai_digest.ai.prompts import build_gemini_prompt_from_rss as _build_prompt
+from ai_digest.cli import main  # noqa: F401 — re-exported; all entrypoints delegate here
 
 # ── Config ────────────────────────────────────────────────────────────────────
 from ai_digest.config import AppConfig
@@ -151,29 +149,9 @@ def run_digest():
     _run_digest_service(_config)
 
 
-# ── Daemon entry point ────────────────────────────────────────────────────────
-
-
-def main():
-    run_once = os.environ.get("RUN_ONCE", "").lower() == "true" or "--run-once" in sys.argv
-    if run_once:
-        print("Running in one-shot mode...")
-        run_digest()
-        print("One-shot run complete.")
-        return
-    send_time = _config.send_time
-    print(f"Starting in scheduler mode. Daily digest time: {send_time}")
-    try:
-        send_telegram(
-            f"✅ Бот запущено в режимі демона. Дайджест надходитиме щодня о {escape_text(send_time)}."
-        )
-    except Exception as exc:
-        print(f"Startup Telegram notification failed: {exc}")
-    schedule.every().day.at(send_time).do(run_digest)
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
-
+# ── Daemon entry point (delegates to ai_digest.cli) ──────────────────────────
+# main is imported above; re-exported here so `from digest import main` and
+# direct `python digest.py` both work.
 
 if __name__ == "__main__":
     main()

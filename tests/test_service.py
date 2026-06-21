@@ -287,7 +287,7 @@ class TestRunDigestServiceWrapper(unittest.TestCase):
 
 
 class TestDigestShim(unittest.TestCase):
-    """digest.run_digest() delegates to DigestService via _run_digest_service."""
+    """digest.run_digest() delegates to service; digest.main delegates to cli."""
 
     def test_run_digest_shim_calls_service(self):
         import digest
@@ -296,23 +296,31 @@ class TestDigestShim(unittest.TestCase):
             digest.run_digest()
         mock_svc_fn.assert_called_once_with(digest._config)
 
-    def test_run_once_flag_calls_run_digest(self):
-        """python digest.py --run-once must call run_digest() exactly once."""
+    def test_digest_main_is_cli_main(self):
+        """digest.main must be the same object as ai_digest.cli.main."""
+        import digest
+        from ai_digest.cli import main as cli_main
+
+        self.assertIs(digest.main, cli_main)
+
+    def test_run_once_flag_calls_run_digest_service(self):
+        """python digest.py --run-once → cli.main → run_digest_service."""
         import digest
 
         with (
-            patch("digest.run_digest") as mock_run,
+            patch("ai_digest.cli.run_digest_service") as mock_run,
             patch("sys.argv", ["digest.py", "--run-once"]),
         ):
             digest.main()
 
         mock_run.assert_called_once()
 
-    def test_run_once_env_var_calls_run_digest(self):
+    def test_run_once_env_var_calls_run_digest_service(self):
+        """RUN_ONCE=true → cli.main → run_digest_service."""
         import digest
 
         with (
-            patch("digest.run_digest") as mock_run,
+            patch("ai_digest.cli.run_digest_service") as mock_run,
             patch.dict("os.environ", {"RUN_ONCE": "true"}),
             patch("sys.argv", ["digest.py"]),
         ):
