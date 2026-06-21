@@ -12,3 +12,6 @@ ENV/
 # Node (in case they have node_modules left)
 node_modules/
 package-lock.json
+.coverage
+htmlcov/
+.pytest_cache/
