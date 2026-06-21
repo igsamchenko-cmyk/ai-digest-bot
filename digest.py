@@ -15,6 +15,8 @@ import schedule
 from google import genai
 from google.genai import types
 
+from ai_digest.config import AppConfig
+
 try:
     KYIV_TZ = ZoneInfo("Europe/Kyiv")
 except ZoneInfoNotFoundError:
@@ -24,33 +26,19 @@ TELEGRAM_LIMIT = 3900
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ai-digest-bot/2.0)"}
 
+# ── Config ────────────────────────────────────────────────────────────────────
+# Loaded once at module level; module-level names kept for backward compat
+# (tests patch digest.TELEGRAM_BOT_TOKEN etc. via patch.object).
+_config = AppConfig.from_env()
 
-def load_env_manually():
-    try:
-        env_path = ".env"
-        if not os.path.exists(env_path):
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            env_path = os.path.join(script_dir, ".env")
-        if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key, val = line.split("=", 1)
-                        os.environ.setdefault(key.strip(), val.strip().strip("\"'"))
-    except Exception as e:
-        print(f"Warning: Failed to load .env file: {e}")
+NEWS_COUNT = _config.news_count
+NEWS_LOOKBACK_HOURS = _config.news_lookback_hours
+GEMINI_API_KEY = _config.gemini_api_key
+TELEGRAM_BOT_TOKEN = _config.telegram_bot_token
+TELEGRAM_CHAT_ID = _config.telegram_chat_id
+SEND_MARKER_PATH = _config.send_marker_path
 
-
-load_env_manually()
-
-NEWS_COUNT = int(os.environ.get("NEWS_COUNT", "5"))
-NEWS_LOOKBACK_HOURS = int(os.environ.get("NEWS_LOOKBACK_HOURS", "72"))
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-
-# --- Українські IT-видання (прямі RSS, чисті посилання на статті) ---
+# ── UA feeds & AI filter ──────────────────────────────────────────────────────
 UA_FEEDS = {
     "DOU": "https://dou.ua/feed/",
     "AIN.UA": "https://ain.ua/feed/",
@@ -60,7 +48,6 @@ UA_FEEDS = {
     "SPEKA": "https://speka.media/feed",
 }
 
-# Фільтр AI-тематики для загальних україномовних стрічок
 AI_PATTERN = re.compile(
     r"(штучн\w*\s+інтелект|нейромереж|нейронн\w*\s+мереж|машинн\w*\s+навчанн"
     r"|\bші\b|\bai\b|openai|chatgpt|\bgpt-?[45o\d]|anthropic|claude|gemini|deepmind"
@@ -212,7 +199,7 @@ def gemini_call(client, contents, use_search=False, json_mode=False, max_retries
     raise RuntimeError("Gemini: all model candidates failed; last error: " + str(last_error))
 
 
-# --- Збір новин ---
+# ── News collection ───────────────────────────────────────────────────────────
 
 
 def world_rss_queries():
@@ -250,7 +237,7 @@ def parse_feed_datetime(value):
 
 
 def parse_feed_items(content, default_source):
-    """Парсить RSS 2.0 та Atom. Повертає список словників."""
+    """Parse RSS 2.0 and Atom. Returns list of dicts."""
     items = []
     try:
         root = ET.fromstring(content)
@@ -309,7 +296,7 @@ def fetch_feed(url, default_source):
 
 
 def get_rss_news():
-    """Збирає новини: спершу українські джерела, потім світові (Google News)."""
+    """Collect news: UA sources first, then global (Google News)."""
     print("Fetching news (UA feeds + Google News)...")
     cutoff = datetime.now(timezone.utc) - timedelta(hours=NEWS_LOOKBACK_HOURS)
     seen_links = set()
@@ -334,15 +321,12 @@ def get_rss_news():
             it["lang"] = lang
             bucket.append(it)
 
-    # 1. Прямі стрічки українських видань (фільтруємо за AI-тематикою)
     for source, url in UA_FEEDS.items():
         add(fetch_feed(url, source), ua_items, "uk", require_keywords=True, require_date=True)
 
-    # 2. Google News українською
     for query in ["штучний інтелект when:3d", "OpenAI OR ChatGPT OR Gemini OR Claude when:3d"]:
         add(fetch_feed(google_news_url(query, "uk"), "Google News UA"), ua_items, "uk")
 
-    # 3. Світові новини (Google News, англійською)
     for query in world_rss_queries():
         add(fetch_feed(google_news_url(query, "en"), "Google News"), world_items, "en")
 
@@ -355,13 +339,11 @@ def get_rss_news():
     return items[: max(NEWS_COUNT * 4, 12)]
 
 
-# --- Захист від повторної відправки ---
-
-SEND_MARKER_PATH = os.environ.get("SEND_MARKER_PATH", ".digest_last_sent")
+# ── Duplicate-send protection ─────────────────────────────────────────────────
 
 
 def enforcing_window():
-    return os.environ.get("ENFORCE_KYIV_HOUR", "").lower() == "true"
+    return _config.enforce_kyiv_hour
 
 
 def read_send_marker():
@@ -385,8 +367,8 @@ def mark_sent_if_enforcing(now):
 def should_skip_scheduled_run(now):
     if not enforcing_window():
         return False
-    start = int(os.environ.get("TARGET_KYIV_HOUR_START", os.environ.get("TARGET_KYIV_HOUR", "8")))
-    end = int(os.environ.get("TARGET_KYIV_HOUR_END", str(start + 1)))
+    start = _config.target_kyiv_hour_start
+    end = _config.target_kyiv_hour_end
     if not (start <= now.hour <= end):
         print(f"Skipping scheduled run at Kyiv hour {now.hour}; send window is {start}-{end}.")
         return True
@@ -397,7 +379,7 @@ def should_skip_scheduled_run(now):
     return False
 
 
-# --- Gemini: відбір і переклад новин ---
+# ── Gemini: select & translate news ──────────────────────────────────────────
 
 
 def build_gemini_prompt_from_rss(items, today_en, nl):
@@ -454,7 +436,7 @@ def build_gemini_prompt_from_rss(items, today_en, nl):
 
 
 def attach_links(data, items):
-    """Підставляє реальні посилання та джерела за id — Gemini ніколи не генерує URL сам."""
+    """Attach real URLs by id — Gemini never generates URLs itself."""
     enriched = []
     for n in data.get("news", []):
         try:
@@ -626,7 +608,7 @@ def main():
         run_digest()
         print("One-shot run complete.")
         return
-    send_time = os.environ.get("SEND_TIME", "08:00")
+    send_time = _config.send_time
     print(f"Starting in scheduler mode. Daily digest time: {send_time}")
     try:
         send_telegram(
