@@ -33,6 +33,7 @@ known-first-party = ["ai_digest", "digest"]
 [tool.black]
 line-length = 100
 target-version = ["py311"]
+exclude = 'archive/'
 
 [tool.mypy]
 python_version = "3.11"
