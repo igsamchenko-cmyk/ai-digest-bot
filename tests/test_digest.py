@@ -2,12 +2,14 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
+import ai_digest.telegram.client as _tg_client
 import digest
 
 
 class DigestFormattingTests(unittest.TestCase):
     def setUp(self):
-        # Скидаємо кеш chat_id між тестами
+        # Скидаємо кеш chat_id між тестами (реальний кеш — у client.py)
+        _tg_client._CHAT_ID_CACHE = None
         digest._CHAT_ID_CACHE = None
 
     def test_escape_text_for_telegram_html(self):
@@ -110,15 +112,19 @@ class DigestFormattingTests(unittest.TestCase):
             ],
         }
         response.raise_for_status.return_value = None
+        # requests.get is called inside ai_digest.telegram.client
         with (
             patch.object(digest, "TELEGRAM_CHAT_ID", ""),
             patch.object(digest, "TELEGRAM_BOT_TOKEN", "token"),
-            patch("digest.requests.get", return_value=response),
+            patch("ai_digest.telegram.client.requests.get", return_value=response),
         ):
             self.assertEqual(digest.resolve_telegram_chat_id(), "67890")
 
     def test_resolve_telegram_chat_id_prefers_env_value(self):
-        with patch.object(digest, "TELEGRAM_CHAT_ID", "555"), patch("digest.requests.get") as get:
+        with (
+            patch.object(digest, "TELEGRAM_CHAT_ID", "555"),
+            patch("ai_digest.telegram.client.requests.get") as get,
+        ):
             self.assertEqual(digest.resolve_telegram_chat_id(), "555")
             get.assert_not_called()
 

@@ -1,4 +1,11 @@
-import html
+"""
+digest.py — backward-compat shim.
+
+Business logic lives in ai_digest/. All public names are re-exported here so
+that existing callers and tests importing `digest` continue to work.
+Stages 3-5 will migrate sources, Gemini, and DigestService into ai_digest/.
+"""
+
 import json
 import os
 import re
@@ -16,19 +23,31 @@ from google import genai
 from google.genai import types
 
 from ai_digest.config import AppConfig
+from ai_digest.telegram.client import resolve_telegram_chat_id as _tg_resolve
+from ai_digest.telegram.client import send_telegram as _tg_send
+from ai_digest.telegram.formatter import (  # noqa: F401  # noqa: F401
+    KYIV_TZ,  # noqa: F401
+    build_gemini_message,
+    build_rss_message,
+    date_labels,  # noqa: F401
+    escape_attr,
+    escape_text,
+)
+from ai_digest.telegram.splitter import (
+    TELEGRAM_LIMIT,  # noqa: F401
+    split_message,  # noqa: F401
+)
 
 try:
-    KYIV_TZ = ZoneInfo("Europe/Kyiv")
+    KYIV_TZ = ZoneInfo("Europe/Kyiv")  # type: ignore[assignment]
 except ZoneInfoNotFoundError:
-    KYIV_TZ = timezone(timedelta(hours=3), name="Europe/Kyiv")
+    KYIV_TZ = timezone(timedelta(hours=3), name="Europe/Kyiv")  # type: ignore[assignment]
 
-TELEGRAM_LIMIT = 3900
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ai-digest-bot/2.0)"}
 
 # ── Config ────────────────────────────────────────────────────────────────────
-# Loaded once at module level; module-level names kept for backward compat
-# (tests patch digest.TELEGRAM_BOT_TOKEN etc. via patch.object).
+# Module-level names kept so tests can do `patch.object(digest, "TELEGRAM_BOT_TOKEN", ...)`
 _config = AppConfig.from_env()
 
 NEWS_COUNT = _config.news_count
@@ -73,94 +92,25 @@ def gemini_model_candidates():
     return result
 
 
-def escape_text(value):
-    return html.escape(str(value or ""), quote=False)
+# ── Telegram shims ────────────────────────────────────────────────────────────
+# Wrappers read module-level TELEGRAM_* at call time, so patch.object still works.
 
-
-def escape_attr(value):
-    return html.escape(str(value or ""), quote=True)
-
-
-def require_telegram_config():
-    if not TELEGRAM_BOT_TOKEN:
-        raise RuntimeError("Missing required environment variable: TELEGRAM_BOT_TOKEN")
-
-
-_CHAT_ID_CACHE = None
+_CHAT_ID_CACHE = None  # kept for setUp compatibility; real cache lives in client.py
 
 
 def resolve_telegram_chat_id():
-    global _CHAT_ID_CACHE
-    if _CHAT_ID_CACHE:
-        return _CHAT_ID_CACHE
-    if TELEGRAM_CHAT_ID:
-        _CHAT_ID_CACHE = TELEGRAM_CHAT_ID
-        return _CHAT_ID_CACHE
-    require_telegram_config()
-    url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getUpdates"
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    data = response.json()
-    if not data.get("ok"):
-        raise RuntimeError("Telegram getUpdates failed: " + str(data))
-    for update in reversed(data.get("result", [])):
-        message = (
-            update.get("message") or update.get("edited_message") or update.get("channel_post")
-        )
-        if not message:
-            continue
-        chat_id = message.get("chat", {}).get("id")
-        if chat_id:
-            _CHAT_ID_CACHE = str(chat_id)
-            print("Resolved TELEGRAM_CHAT_ID from getUpdates: " + _CHAT_ID_CACHE)
-            return _CHAT_ID_CACHE
-    raise RuntimeError(
-        "TELEGRAM_CHAT_ID is not set and getUpdates has no messages. "
-        "Open your Telegram bot, send /start or any message, then re-run the workflow."
-    )
+    import ai_digest.telegram.client as _client
 
-
-def split_message(text, limit=TELEGRAM_LIMIT):
-    if len(text) <= limit:
-        return [text]
-    chunks = []
-    current = []
-    current_len = 0
-    for paragraph in text.split("\n\n"):
-        block = paragraph if not current else "\n\n" + paragraph
-        if current and current_len + len(block) > limit:
-            chunks.append("".join(current))
-            current = [paragraph]
-            current_len = len(paragraph)
-        elif len(paragraph) > limit:
-            if current:
-                chunks.append("".join(current))
-                current = []
-                current_len = 0
-            for i in range(0, len(paragraph), limit):
-                chunks.append(paragraph[i : i + limit])
-        else:
-            current.append(block)
-            current_len += len(block)
-    if current:
-        chunks.append("".join(current))
-    return chunks
+    _client._CHAT_ID_CACHE = _CHAT_ID_CACHE  # sync reset from tests
+    result = _tg_resolve(token=TELEGRAM_BOT_TOKEN, chat_id=TELEGRAM_CHAT_ID)
+    return result
 
 
 def send_telegram(text):
-    chat_id = resolve_telegram_chat_id()
-    url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage"
-    for part in split_message(text):
-        requests.post(
-            url,
-            json={
-                "chat_id": chat_id,
-                "text": part,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
-            timeout=30,
-        ).raise_for_status()
+    _tg_send(text, token=TELEGRAM_BOT_TOKEN, chat_id=TELEGRAM_CHAT_ID)
+
+
+# ── Gemini ────────────────────────────────────────────────────────────────────
 
 
 def gemini_call(client, contents, use_search=False, json_mode=False, max_retries=3):
@@ -191,7 +141,8 @@ def gemini_call(client, contents, use_search=False, json_mode=False, max_retries
                 if "429" in err or "RESOURCE_EXHAUSTED" in err:
                     wait = 5 * (2**attempt)
                     print(
-                        f"Rate limit on {model}. Waiting {wait}s (attempt {attempt + 1}/{max_retries})..."
+                        f"Rate limit on {model}. Waiting {wait}s"
+                        f" (attempt {attempt + 1}/{max_retries})..."
                     )
                     time.sleep(wait)
                 else:
@@ -411,7 +362,9 @@ def build_gemini_prompt_from_rss(items, today_en, nl):
         + str(NEWS_LOOKBACK_HOURS)
         + " hours. Select the "
         + str(min(NEWS_COUNT, len(items)))
-        + " most relevant, fresh, non-duplicate AI news items. Prioritize model releases, major product launches, benchmarks, and competitive moves by OpenAI, Anthropic, Google/Gemini, Meta/Llama, Mistral, DeepSeek, Qwen, xAI/Grok, Microsoft, Perplexity."
+        + " most relevant, fresh, non-duplicate AI news items. Prioritize model releases, major"
+        " product launches, benchmarks, and competitive moves by OpenAI, Anthropic,"
+        " Google/Gemini, Meta/Llama, Mistral, DeepSeek, Qwen, xAI/Grok, Microsoft, Perplexity."
         + nl
         + "When two items cover the same story, prefer the one with Language: uk (Ukrainian source)."
         + nl
@@ -419,7 +372,8 @@ def build_gemini_prompt_from_rss(items, today_en, nl):
         + nl
         + "Translate titles to Ukrainian and write concise summaries in Ukrainian."
         + nl
-        + 'Return ONLY valid JSON (no markdown). The "id" field MUST be the exact number of the item in the list below — never invent it:'
+        + 'Return ONLY valid JSON (no markdown). The "id" field MUST be the exact number of the'
+        " item in the list below — never invent it:"
         + nl
         + '{"summary":"2-3 sentence overview in Ukrainian","news":['
         + nl
@@ -453,100 +407,7 @@ def attach_links(data, items):
     return data
 
 
-def build_gemini_message(data, today_uk):
-    importance_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}
-    category_icon = {
-        "LLM": "🧠",
-        "Продукти": "📦",
-        "Дослідження": "🔬",
-        "Компанії": "🏢",
-        "Агенти": "🤖",
-        "Безпека": "🛡️",
-    }
-    sep = "━" * 19
-    lines = [
-        "⚡ <b>AI Дайджест</b> · " + escape_text(today_uk),
-        sep,
-        "<i>" + escape_text(data.get("summary", "")) + "</i>",
-        "",
-    ]
-    for i, item in enumerate(data.get("news", []), 1):
-        importance = item.get("importance", "medium")
-        category = item.get("category", "")
-        title_html = escape_text(item.get("title", ""))
-        link = item.get("link", "")
-        if link:
-            title_html = '<a href="' + escape_attr(link) + '">' + title_html + "</a>"
-        lines += [
-            importance_icon.get(importance, "⚪") + " <b>" + str(i) + ". " + title_html + "</b>",
-            category_icon.get(category, "📌")
-            + " <code>"
-            + escape_text(category)
-            + "</code> // "
-            + escape_text(item.get("source", "")),
-            escape_text(item.get("summary", "")),
-            "💡 <i>" + escape_text(item.get("why_matters", "")) + "</i>",
-            "",
-        ]
-    lines += [sep, "🤖 Gemini · UA RSS + Google News"]
-    return "\n".join(lines)
-
-
-def build_rss_message(items, today_uk):
-    sep = "━" * 19
-    lines = [
-        "⚡ <b>AI Дайджест (резервний)</b> · " + escape_text(today_uk),
-        sep,
-        "<i>Gemini зараз недоступний. Надсилаю свіжі новини напряму з RSS.</i>",
-        "",
-    ]
-    for i, item in enumerate(items[: NEWS_COUNT * 2], 1):
-        published = item.get("published_at")
-        published_label = (
-            published.astimezone(KYIV_TZ).strftime("%d.%m %H:%M") if published else "свіже"
-        )
-        lines += [
-            f"📰 <b>{i}. {escape_text(item['title'])}</b>",
-            f"🕒 {escape_text(published_label)} · <a href=\"{escape_attr(item['link'])}\">Читати на {escape_text(item['source'])}</a>",
-            "",
-        ]
-    lines += [sep, "📡 RSS Feed"]
-    return "\n".join(lines)
-
-
-def date_labels(now):
-    months_uk = [
-        "січня",
-        "лютого",
-        "березня",
-        "квітня",
-        "травня",
-        "червня",
-        "липня",
-        "серпня",
-        "вересня",
-        "жовтня",
-        "листопада",
-        "грудня",
-    ]
-    months_en = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ]
-    return (
-        f"{now.day} {months_uk[now.month - 1]} {now.year}",
-        f"{months_en[now.month - 1]} {now.day}, {now.year}",
-    )
+# ── Orchestration ─────────────────────────────────────────────────────────────
 
 
 def run_digest():
@@ -591,7 +452,7 @@ def run_digest():
             )
             mark_sent_if_enforcing(now)
             return
-        send_telegram(build_rss_message(items, today_uk))
+        send_telegram(build_rss_message(items, today_uk, news_count=NEWS_COUNT))
         mark_sent_if_enforcing(now)
         print("Done via Fallback RSS!")
     except Exception as err:
