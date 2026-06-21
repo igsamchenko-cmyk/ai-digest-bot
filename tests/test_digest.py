@@ -254,24 +254,52 @@ class TestTelegramClientSecurity(unittest.TestCase):
 
 
 class TestRunDigestErrorHandling(unittest.TestCase):
-    """Regression: error-notification failure must never create an unhandled traceback."""
+    """Regression: error-notification failure must never create an unhandled traceback.
+
+    After Stage 5, orchestration lives in DigestService.run().  These tests
+    exercise the service directly (patching at ai_digest.digest.service.*) so
+    that the scenarios are still fully covered.
+    """
+
+    _FAKE_CFG = None  # populated in setUp
 
     def setUp(self):
+        from ai_digest.config import AppConfig
+
         _tg_client._CHAT_ID_CACHE = None
         digest._CHAT_ID_CACHE = None
+        self._FAKE_CFG = AppConfig(
+            telegram_bot_token="TOKEN",
+            telegram_chat_id="-100",
+            gemini_api_key="",  # empty → Gemini path is skipped
+            news_count=5,
+            news_lookback_hours=72,
+            gemini_model="",
+            send_marker_path=".test_marker_errhandling",
+            enforce_kyiv_hour=False,
+            target_kyiv_hour_start=8,
+            target_kyiv_hour_end=9,
+            send_time="08:00",
+        )
+
+    def _svc(self):
+        from ai_digest.digest.service import DigestService
+
+        return DigestService(self._FAKE_CFG)
 
     def test_error_notification_failure_does_not_propagate(self):
-        """No items + send_telegram always fails → run_digest() must return, not raise."""
+        """No items + send_telegram always fails → service.run() must return, not raise."""
+
+        svc = self._svc()
         with (
-            patch.object(digest, "should_skip_scheduled_run", return_value=False),
-            patch.object(digest, "get_rss_news", return_value=[]),
-            patch.object(digest, "GEMINI_API_KEY", ""),
-            patch.object(digest, "send_telegram", side_effect=RuntimeError("network down")),
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=[]),
+            patch("ai_digest.digest.service.send_telegram", side_effect=RuntimeError("down")),
         ):
             try:
-                digest.run_digest()
+                svc.run()
             except Exception as exc:
-                self.fail(f"run_digest() raised unexpectedly: {exc}")
+                self.fail(f"DigestService.run() raised unexpectedly: {exc}")
 
     def test_fallback_send_failure_does_not_propagate(self):
         """Items present, Gemini absent, fallback send_telegram fails → must not raise."""
@@ -284,19 +312,21 @@ class TestRunDigestErrorHandling(unittest.TestCase):
                 "language": "uk",
             }
         ]
+        svc = self._svc()
         with (
-            patch.object(digest, "should_skip_scheduled_run", return_value=False),
-            patch.object(digest, "get_rss_news", return_value=items),
-            patch.object(digest, "GEMINI_API_KEY", ""),
-            patch.object(digest, "send_telegram", side_effect=RuntimeError("send failed")),
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=items),
+            patch(
+                "ai_digest.digest.service.send_telegram", side_effect=RuntimeError("send failed")
+            ),
         ):
             try:
-                digest.run_digest()
+                svc.run()
             except Exception as exc:
-                self.fail(f"run_digest() raised unexpectedly: {exc}")
+                self.fail(f"DigestService.run() raised unexpectedly: {exc}")
 
     def test_error_notification_called_after_fallback_failure(self):
-        """Verify the error-notification send_telegram IS attempted (not silently skipped)."""
+        """Verify the error-notification send IS attempted after the fallback fails."""
         items = [
             {
                 "title": "AI news",
@@ -306,20 +336,19 @@ class TestRunDigestErrorHandling(unittest.TestCase):
                 "language": "uk",
             }
         ]
-        send_calls = []
+        send_calls: list[str] = []
 
-        def tracked_send(text):
+        def tracked_send(text, *, token, chat_id):
             send_calls.append(text)
             raise RuntimeError("always fails")
 
+        svc = self._svc()
         with (
-            patch.object(digest, "should_skip_scheduled_run", return_value=False),
-            patch.object(digest, "get_rss_news", return_value=items),
-            patch.object(digest, "GEMINI_API_KEY", ""),
-            patch.object(digest, "send_telegram", side_effect=tracked_send),
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=items),
+            patch("ai_digest.digest.service.send_telegram", side_effect=tracked_send),
         ):
-            digest.run_digest()
+            svc.run()
 
         self.assertGreaterEqual(len(send_calls), 2, "Expected at least 2 send_telegram calls")
-        # Second call must be the error-notification message
         self.assertIn("Помилка", send_calls[-1])
