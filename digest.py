@@ -201,10 +201,13 @@ def run_digest():
         mark_sent_if_enforcing(now)
         print("Done via Fallback RSS!")
     except Exception as err:
-        print(f"Fallback also failed: {err}")
-        send_telegram(
-            "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS."
-        )
+        print(f"Fallback also failed: {type(err).__name__}: {err}")
+        try:
+            send_telegram(
+                "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS."
+            )
+        except Exception as send_err:
+            print(f"Error notification also failed: {type(send_err).__name__}")
 
 
 def main():

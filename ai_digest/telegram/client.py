@@ -37,6 +37,8 @@ def resolve_telegram_chat_id(token: str, chat_id: str) -> str:
         response.raise_for_status()
     except requests.HTTPError as exc:
         raise RuntimeError(_http_error_msg(exc, "Telegram getUpdates")) from exc
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Telegram getUpdates failed: {type(exc).__name__}") from exc
     data = response.json()
     if not data.get("ok"):
         raise RuntimeError("Telegram getUpdates returned ok=false")
@@ -77,3 +79,5 @@ def send_telegram(text: str, token: str, chat_id: str) -> None:
             resp.raise_for_status()
         except requests.HTTPError as exc:
             raise RuntimeError(_http_error_msg(exc, "Telegram sendMessage")) from exc
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Telegram sendMessage failed: {type(exc).__name__}") from exc
