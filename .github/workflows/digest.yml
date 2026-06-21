@@ -24,6 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m compileall ai_digest digest.py
       - run: pytest -q
@@ -37,6 +38,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - run: pip install -r requirements.txt
 
       # Відновлюємо маркер "вже надіслано сьогодні" з попереднього запуску.

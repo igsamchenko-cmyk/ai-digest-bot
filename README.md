@@ -98,6 +98,15 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
+### 🔁 Локальне повторне тестування
+
+Якщо `ENFORCE_KYIV_HOUR=true` і маркер уже записаний, `--run-once` **не** обходить перевірку маркера — дайджест буде пропущений (це нормальна поведінка для захисту від дублювання у GitHub Actions).
+
+Для повторного тестового запуску:
+```bash
+ENFORCE_KYIV_HOUR=false python digest.py --run-once
+```
+
 ---
 
 ## 📰 Актуальність новин
