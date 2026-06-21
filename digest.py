@@ -117,7 +117,9 @@ def resolve_telegram_chat_id():
     if not data.get("ok"):
         raise RuntimeError("Telegram getUpdates failed: " + str(data))
     for update in reversed(data.get("result", [])):
-        message = update.get("message") or update.get("edited_message") or update.get("channel_post")
+        message = (
+            update.get("message") or update.get("edited_message") or update.get("channel_post")
+        )
         if not message:
             continue
         chat_id = message.get("chat", {}).get("id")
@@ -201,7 +203,9 @@ def gemini_call(client, contents, use_search=False, json_mode=False, max_retries
                     break
                 if "429" in err or "RESOURCE_EXHAUSTED" in err:
                     wait = 5 * (2**attempt)
-                    print(f"Rate limit on {model}. Waiting {wait}s (attempt {attempt + 1}/{max_retries})...")
+                    print(
+                        f"Rate limit on {model}. Waiting {wait}s (attempt {attempt + 1}/{max_retries})..."
+                    )
                     time.sleep(wait)
                 else:
                     raise
@@ -210,13 +214,14 @@ def gemini_call(client, contents, use_search=False, json_mode=False, max_retries
 
 # --- Збір новин ---
 
+
 def world_rss_queries():
     return [
         '("AI model" OR "language model" OR LLM) (released OR launches OR announced OR update OR benchmark) when:3d',
-        '(OpenAI OR ChatGPT OR GPT) (model OR release OR update OR launch) when:3d',
-        '(Anthropic OR Claude) (model OR release OR update OR launch OR benchmark) when:3d',
-        '(Google OR Gemini OR DeepMind) (AI model OR release OR update OR launch) when:3d',
-        '(Meta OR Llama OR Mistral OR DeepSeek OR Qwen OR xAI OR Grok) (model OR release OR update OR launch) when:3d',
+        "(OpenAI OR ChatGPT OR GPT) (model OR release OR update OR launch) when:3d",
+        "(Anthropic OR Claude) (model OR release OR update OR launch OR benchmark) when:3d",
+        "(Google OR Gemini OR DeepMind) (AI model OR release OR update OR launch) when:3d",
+        "(Meta OR Llama OR Mistral OR DeepSeek OR Qwen OR xAI OR Grok) (model OR release OR update OR launch) when:3d",
         '(Microsoft Copilot OR Perplexity OR "AI agent" OR "coding agent") (release OR update OR launch) when:3d',
     ]
 
@@ -344,7 +349,9 @@ def get_rss_news():
     ua_items.sort(key=item_sort_time, reverse=True)
     world_items.sort(key=item_sort_time, reverse=True)
     items = ua_items + world_items
-    print(f"Found {len(ua_items)} UA + {len(world_items)} world items (last {NEWS_LOOKBACK_HOURS}h).")
+    print(
+        f"Found {len(ua_items)} UA + {len(world_items)} world items (last {NEWS_LOOKBACK_HOURS}h)."
+    )
     return items[: max(NEWS_COUNT * 4, 12)]
 
 
@@ -392,6 +399,7 @@ def should_skip_scheduled_run(now):
 
 # --- Gemini: відбір і переклад новин ---
 
+
 def build_gemini_prompt_from_rss(items, today_en, nl):
     categories = "LLM|Продукти|Дослідження|Компанії|Агенти|Безпека"
     news_lines = []
@@ -400,13 +408,23 @@ def build_gemini_prompt_from_rss(items, today_en, nl):
         published_text = published.isoformat() if published else "unknown"
         news_lines.append(
             str(i)
-            + ". Title: " + str(item.get("title", ""))
-            + nl + "Source: " + str(item.get("source", ""))
-            + nl + "Language: " + str(item.get("lang", "en"))
-            + nl + "Published: " + published_text
+            + ". Title: "
+            + str(item.get("title", ""))
+            + nl
+            + "Source: "
+            + str(item.get("source", ""))
+            + nl
+            + "Language: "
+            + str(item.get("lang", "en"))
+            + nl
+            + "Published: "
+            + published_text
         )
     return (
-        "You are a Ukrainian AI news editor. Today is " + today_en + "." + nl
+        "You are a Ukrainian AI news editor. Today is "
+        + today_en
+        + "."
+        + nl
         + "Below is a numbered list of news items from the last "
         + str(NEWS_LOOKBACK_HOURS)
         + " hours. Select the "
@@ -423,7 +441,9 @@ def build_gemini_prompt_from_rss(items, today_en, nl):
         + nl
         + '{"summary":"2-3 sentence overview in Ukrainian","news":['
         + nl
-        + '{"id":1,"title":"заголовок українською","category":"' + categories + '",'
+        + '{"id":1,"title":"заголовок українською","category":"'
+        + categories
+        + '",'
         + '"importance":"high|medium|low","summary":"2-3 sentences in Ukrainian",'
         + '"why_matters":"1 sentence in Ukrainian"}]}'
         + nl
@@ -478,7 +498,9 @@ def build_gemini_message(data, today_uk):
         lines += [
             importance_icon.get(importance, "⚪") + " <b>" + str(i) + ". " + title_html + "</b>",
             category_icon.get(category, "📌")
-            + " <code>" + escape_text(category) + "</code> // "
+            + " <code>"
+            + escape_text(category)
+            + "</code> // "
             + escape_text(item.get("source", "")),
             escape_text(item.get("summary", "")),
             "💡 <i>" + escape_text(item.get("why_matters", "")) + "</i>",
@@ -496,9 +518,11 @@ def build_rss_message(items, today_uk):
         "<i>Gemini зараз недоступний. Надсилаю свіжі новини напряму з RSS.</i>",
         "",
     ]
-    for i, item in enumerate(items[:NEWS_COUNT * 2], 1):
+    for i, item in enumerate(items[: NEWS_COUNT * 2], 1):
         published = item.get("published_at")
-        published_label = published.astimezone(KYIV_TZ).strftime("%d.%m %H:%M") if published else "свіже"
+        published_label = (
+            published.astimezone(KYIV_TZ).strftime("%d.%m %H:%M") if published else "свіже"
+        )
         lines += [
             f"📰 <b>{i}. {escape_text(item['title'])}</b>",
             f"🕒 {escape_text(published_label)} · <a href=\"{escape_attr(item['link'])}\">Читати на {escape_text(item['source'])}</a>",
@@ -510,12 +534,32 @@ def build_rss_message(items, today_uk):
 
 def date_labels(now):
     months_uk = [
-        "січня", "лютого", "березня", "квітня", "травня", "червня",
-        "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
+        "січня",
+        "лютого",
+        "березня",
+        "квітня",
+        "травня",
+        "червня",
+        "липня",
+        "серпня",
+        "вересня",
+        "жовтня",
+        "листопада",
+        "грудня",
     ]
     months_en = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ]
     return (
         f"{now.day} {months_uk[now.month - 1]} {now.year}",
@@ -570,7 +614,9 @@ def run_digest():
         print("Done via Fallback RSS!")
     except Exception as err:
         print(f"Fallback also failed: {err}")
-        send_telegram("⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS.")
+        send_telegram(
+            "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS."
+        )
 
 
 def main():
@@ -583,7 +629,9 @@ def main():
     send_time = os.environ.get("SEND_TIME", "08:00")
     print(f"Starting in scheduler mode. Daily digest time: {send_time}")
     try:
-        send_telegram(f"✅ Бот запущено в режимі демона. Дайджест надходитиме щодня о {escape_text(send_time)}.")
+        send_telegram(
+            f"✅ Бот запущено в режимі демона. Дайджест надходитиме щодня о {escape_text(send_time)}."
+        )
     except Exception as e:
         print(f"Startup Telegram notification failed: {e}")
     schedule.every().day.at(send_time).do(run_digest)

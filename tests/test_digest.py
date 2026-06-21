@@ -110,9 +110,11 @@ class DigestFormattingTests(unittest.TestCase):
             ],
         }
         response.raise_for_status.return_value = None
-        with patch.object(digest, "TELEGRAM_CHAT_ID", ""), patch.object(
-            digest, "TELEGRAM_BOT_TOKEN", "token"
-        ), patch("digest.requests.get", return_value=response):
+        with (
+            patch.object(digest, "TELEGRAM_CHAT_ID", ""),
+            patch.object(digest, "TELEGRAM_BOT_TOKEN", "token"),
+            patch("digest.requests.get", return_value=response),
+        ):
             self.assertEqual(digest.resolve_telegram_chat_id(), "67890")
 
     def test_resolve_telegram_chat_id_prefers_env_value(self):
