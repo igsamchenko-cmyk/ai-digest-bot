@@ -15,6 +15,9 @@ dependencies = [
 [project.scripts]
 ai-digest = "ai_digest.__main__:main"
 
+[tool.setuptools.packages.find]
+include = ["ai_digest*"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
