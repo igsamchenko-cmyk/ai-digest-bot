@@ -12,6 +12,7 @@ scheduler loop behave identically regardless of how the bot is started.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import time
@@ -20,6 +21,7 @@ import schedule
 
 from ai_digest.config import AppConfig
 from ai_digest.digest.service import run_digest_service
+from ai_digest.logging_setup import setup_logging
 from ai_digest.telegram.client import send_telegram
 from ai_digest.telegram.formatter import escape_text
 
@@ -27,6 +29,7 @@ from ai_digest.telegram.formatter import escape_text
 def main() -> None:
     """Parse CLI flags, then either run once or start the daily scheduler."""
     config = AppConfig.from_env()
+    setup_logging(level=logging.INFO, token=config.telegram_bot_token)
     run_once = os.environ.get("RUN_ONCE", "").lower() == "true" or "--run-once" in sys.argv
     if run_once:
         print("Running in one-shot mode...")
