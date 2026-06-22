@@ -2,12 +2,16 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
+import requests
+
+import ai_digest.telegram.client as _tg_client
 import digest
 
 
 class DigestFormattingTests(unittest.TestCase):
     def setUp(self):
-        # Скидаємо кеш chat_id між тестами
+        # Скидаємо кеш chat_id між тестами (реальний кеш — у client.py)
+        _tg_client._CHAT_ID_CACHE = None
         digest._CHAT_ID_CACHE = None
 
     def test_escape_text_for_telegram_html(self):
@@ -110,13 +114,19 @@ class DigestFormattingTests(unittest.TestCase):
             ],
         }
         response.raise_for_status.return_value = None
-        with patch.object(digest, "TELEGRAM_CHAT_ID", ""), patch.object(
-            digest, "TELEGRAM_BOT_TOKEN", "token"
-        ), patch("digest.requests.get", return_value=response):
+        # requests.get is called inside ai_digest.telegram.client
+        with (
+            patch.object(digest, "TELEGRAM_CHAT_ID", ""),
+            patch.object(digest, "TELEGRAM_BOT_TOKEN", "token"),
+            patch("ai_digest.telegram.client.requests.get", return_value=response),
+        ):
             self.assertEqual(digest.resolve_telegram_chat_id(), "67890")
 
     def test_resolve_telegram_chat_id_prefers_env_value(self):
-        with patch.object(digest, "TELEGRAM_CHAT_ID", "555"), patch("digest.requests.get") as get:
+        with (
+            patch.object(digest, "TELEGRAM_CHAT_ID", "555"),
+            patch("ai_digest.telegram.client.requests.get") as get,
+        ):
             self.assertEqual(digest.resolve_telegram_chat_id(), "555")
             get.assert_not_called()
 
@@ -155,3 +165,190 @@ class DigestFormattingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTelegramClientSecurity(unittest.TestCase):
+    """Regression: network errors must never expose the bot token or API URL."""
+
+    FAKE_TOKEN = "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+    FAKE_CHAT_ID = "-100123456789"
+
+    def setUp(self):
+        _tg_client._CHAT_ID_CACHE = None
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _url_in_exc_str(self, exc_type: type, suffix: str) -> Exception:
+        """Return a network exception whose str() contains the token URL path."""
+        return exc_type(
+            f"HTTPSConnectionPool(host='api.telegram.org', port=443): "
+            f"Max retries exceeded with url: /bot{self.FAKE_TOKEN}/{suffix}"
+        )
+
+    def _assert_safe(self, exc: RuntimeError) -> None:
+        msg = str(exc)
+        self.assertNotIn(self.FAKE_TOKEN, msg, "Bot token must not appear in RuntimeError")
+        self.assertNotIn(
+            "api.telegram.org/bot", msg, "Telegram API URL must not appear in RuntimeError"
+        )
+
+    # ── send_telegram ─────────────────────────────────────────────────────────
+
+    def test_send_telegram_proxy_error_no_token_leak(self):
+        err = self._url_in_exc_str(requests.exceptions.ProxyError, "sendMessage")
+        with patch("ai_digest.telegram.client.requests.post", side_effect=err):
+            with self.assertRaises(RuntimeError) as ctx:
+                _tg_client.send_telegram("hi", self.FAKE_TOKEN, self.FAKE_CHAT_ID)
+        self._assert_safe(ctx.exception)
+        self.assertIn("ProxyError", str(ctx.exception))
+
+    def test_send_telegram_connection_error_no_token_leak(self):
+        err = self._url_in_exc_str(requests.exceptions.ConnectionError, "sendMessage")
+        with patch("ai_digest.telegram.client.requests.post", side_effect=err):
+            with self.assertRaises(RuntimeError) as ctx:
+                _tg_client.send_telegram("hi", self.FAKE_TOKEN, self.FAKE_CHAT_ID)
+        self._assert_safe(ctx.exception)
+        self.assertIn("ConnectionError", str(ctx.exception))
+
+    def test_send_telegram_timeout_no_token_leak(self):
+        with patch(
+            "ai_digest.telegram.client.requests.post",
+            side_effect=requests.exceptions.Timeout("timed out"),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                _tg_client.send_telegram("hi", self.FAKE_TOKEN, self.FAKE_CHAT_ID)
+        self._assert_safe(ctx.exception)
+        self.assertIn("Timeout", str(ctx.exception))
+
+    def test_send_telegram_http_error_exposes_status_not_url(self):
+        """HTTPError path: message shows HTTP status, not the full URL."""
+        http_resp = Mock()
+        http_resp.status_code = 401
+        http_resp.reason = "Unauthorized"
+        with patch(
+            "ai_digest.telegram.client.requests.post",
+            side_effect=requests.exceptions.HTTPError(response=http_resp),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                _tg_client.send_telegram("hi", self.FAKE_TOKEN, self.FAKE_CHAT_ID)
+        self._assert_safe(ctx.exception)
+        self.assertIn("401", str(ctx.exception))
+
+    # ── resolve_telegram_chat_id ──────────────────────────────────────────────
+
+    def test_resolve_chat_id_proxy_error_no_token_leak(self):
+        err = self._url_in_exc_str(requests.exceptions.ProxyError, "getUpdates")
+        with patch("ai_digest.telegram.client.requests.get", side_effect=err):
+            with self.assertRaises(RuntimeError) as ctx:
+                _tg_client.resolve_telegram_chat_id(self.FAKE_TOKEN, "")
+        self._assert_safe(ctx.exception)
+        self.assertIn("ProxyError", str(ctx.exception))
+
+    def test_resolve_chat_id_connection_error_no_token_leak(self):
+        err = self._url_in_exc_str(requests.exceptions.ConnectionError, "getUpdates")
+        with patch("ai_digest.telegram.client.requests.get", side_effect=err):
+            with self.assertRaises(RuntimeError) as ctx:
+                _tg_client.resolve_telegram_chat_id(self.FAKE_TOKEN, "")
+        self._assert_safe(ctx.exception)
+        self.assertIn("ConnectionError", str(ctx.exception))
+
+
+class TestRunDigestErrorHandling(unittest.TestCase):
+    """Regression: error-notification failure must never create an unhandled traceback.
+
+    After Stage 5, orchestration lives in DigestService.run().  These tests
+    exercise the service directly (patching at ai_digest.digest.service.*) so
+    that the scenarios are still fully covered.
+    """
+
+    _FAKE_CFG = None  # populated in setUp
+
+    def setUp(self):
+        from ai_digest.config import AppConfig
+
+        _tg_client._CHAT_ID_CACHE = None
+        digest._CHAT_ID_CACHE = None
+        self._FAKE_CFG = AppConfig(
+            telegram_bot_token="TOKEN",
+            telegram_chat_id="-100",
+            gemini_api_key="",  # empty → Gemini path is skipped
+            news_count=5,
+            news_lookback_hours=72,
+            gemini_model="",
+            send_marker_path=".test_marker_errhandling",
+            enforce_kyiv_hour=False,
+            target_kyiv_hour_start=8,
+            target_kyiv_hour_end=9,
+            send_time="08:00",
+        )
+
+    def _svc(self):
+        from ai_digest.digest.service import DigestService
+
+        return DigestService(self._FAKE_CFG)
+
+    def test_error_notification_failure_does_not_propagate(self):
+        """No items + send_telegram always fails → service.run() must return, not raise."""
+
+        svc = self._svc()
+        with (
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=[]),
+            patch("ai_digest.digest.service.send_telegram", side_effect=RuntimeError("down")),
+        ):
+            try:
+                svc.run()
+            except Exception as exc:
+                self.fail(f"DigestService.run() raised unexpectedly: {exc}")
+
+    def test_fallback_send_failure_does_not_propagate(self):
+        """Items present, Gemini absent, fallback send_telegram fails → must not raise."""
+        items = [
+            {
+                "title": "AI news",
+                "link": "https://example.com/1",
+                "source": "DOU",
+                "published_at": None,
+                "language": "uk",
+            }
+        ]
+        svc = self._svc()
+        with (
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=items),
+            patch(
+                "ai_digest.digest.service.send_telegram", side_effect=RuntimeError("send failed")
+            ),
+        ):
+            try:
+                svc.run()
+            except Exception as exc:
+                self.fail(f"DigestService.run() raised unexpectedly: {exc}")
+
+    def test_error_notification_called_after_fallback_failure(self):
+        """Verify the error-notification send IS attempted after the fallback fails."""
+        items = [
+            {
+                "title": "AI news",
+                "link": "https://example.com/1",
+                "source": "DOU",
+                "published_at": None,
+                "language": "uk",
+            }
+        ]
+        send_calls: list[str] = []
+
+        def tracked_send(text, *, token, chat_id):
+            send_calls.append(text)
+            raise RuntimeError("always fails")
+
+        svc = self._svc()
+        with (
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=items),
+            patch("ai_digest.digest.service.send_telegram", side_effect=tracked_send),
+        ):
+            svc.run()
+
+        self.assertGreaterEqual(len(send_calls), 2, "Expected at least 2 send_telegram calls")
+        self.assertIn("Помилка", send_calls[-1])

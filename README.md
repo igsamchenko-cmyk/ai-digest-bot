@@ -61,13 +61,21 @@
    TELEGRAM_CHAT_ID=ваш_telegram_chat_id
    GEMINI_API_KEY=ваш_ключ_gemini
    ```
-4. Запустіть один раз для тестування:
+4. Запустіть один раз для тестування (будь-який варіант еквівалентний):
+   ```bash
+   python digest.py --run-once
+   python -m ai_digest --run-once
+   ai-digest --run-once          # після pip install -e .
+   ```
+5. Для щоденного автозапуску у **daemon-режимі** (тримає процес):
    ```bash
    python digest.py
+   # або
+   python -m ai_digest
    ```
-5. Для налаштування щоденного автозапуску у Windows скористайтеся **Планувальником завдань** (Task Scheduler):
-   - Оберіть запуск програми: `python`
-   - Аргументи: `digest.py`
+   Для налаштування у Windows скористайтеся **Планувальником завдань** (Task Scheduler):
+   - Програма: `python`, аргументи: `digest.py`
+   - Або `ai-digest` після `pip install -e .`
    - Робоча папка: повний шлях до каталогу бота.
 
 ---
@@ -77,11 +85,27 @@
 Перед запуском розсилки GitHub Actions автоматично виконує:
 
 ```bash
-python -m compileall digest.py tests
-python -m unittest discover -s tests
+ruff check .              # лінтер
+black --check .           # форматування
+mypy ai_digest digest.py  # статичні типи
+pip-audit -r requirements.txt  # аудит безпеки
+pytest -q --cov=ai_digest # тести з покриттям
 ```
 
-Ці перевірки ловлять синтаксичні помилки, проблеми HTML-форматування Telegram-повідомлень і розбиття довгих дайджестів.
+Запустити локально:
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+### 🔁 Локальне повторне тестування
+
+Якщо `ENFORCE_KYIV_HOUR=true` і маркер уже записаний, `--run-once` **не** обходить перевірку маркера — дайджест буде пропущений (це нормальна поведінка для захисту від дублювання у GitHub Actions).
+
+Для повторного тестового запуску:
+```bash
+ENFORCE_KYIV_HOUR=false python digest.py --run-once
+```
 
 ---
 
