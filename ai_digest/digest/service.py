@@ -88,7 +88,19 @@ class DigestService:
         """Execute one full digest cycle."""
         cfg = self._cfg
         now = datetime.now(KYIV_TZ)
+
+        def _summary(path: str, sent: bool) -> None:
+            """Emit exactly one structured end-of-run line."""
+            logger.info(
+                "RUN SUMMARY: rss_items=%d path=%s sent=%s",
+                len(items),
+                path,
+                "true" if sent else "false",
+            )
+
+        items: list[dict] = []
         if self.should_skip_scheduled_run(now):
+            _summary("skipped", False)
             return
 
         today_uk, today_en = date_labels(now)
@@ -96,7 +108,6 @@ class DigestService:
         nl = chr(10)
 
         # ── 1. Fetch news ─────────────────────────────────────────────────────
-        items: list[dict] = []
         try:
             items = get_rss_news(
                 news_lookback_hours=cfg.news_lookback_hours,
@@ -131,6 +142,7 @@ class DigestService:
                 )
                 self.mark_sent_if_enforcing(now)
                 logger.info("Done via Gemini!")
+                _summary("gemini", True)
                 return
             except Exception as exc:
                 logger.error("Gemini execution failed: %s. Falling back to RSS...", exc)
@@ -146,6 +158,7 @@ class DigestService:
                     chat_id=cfg.telegram_chat_id,
                 )
                 self.mark_sent_if_enforcing(now)
+                _summary("empty", True)
                 return
             send_telegram(
                 build_rss_message(items, today_uk, news_count=cfg.news_count),
@@ -154,8 +167,10 @@ class DigestService:
             )
             self.mark_sent_if_enforcing(now)
             logger.info("Done via Fallback RSS!")
+            _summary("rss", True)
         except Exception as err:
             logger.error("Fallback also failed: %s: %s", type(err).__name__, err)
+            _summary("error", False)
             try:
                 send_telegram(
                     "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS.",
