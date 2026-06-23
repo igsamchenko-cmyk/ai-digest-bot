@@ -156,3 +156,100 @@ class TestRunSummary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSecretRedactingFilterArgTypes(unittest.TestCase):
+    """SecretRedactingFilter must not corrupt non-string logging args."""
+
+    def test_integer_arg_preserved_with_percent_d(self):
+        """%d format with an integer arg must not raise after filtering."""
+        token = "111111111:AABBccDDeeFFggHHiiJJkkLLmmNNooP12345"
+        flt = SecretRedactingFilter(token)
+        record = logging.LogRecord(
+            name="t",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="RUN SUMMARY: rss_items=%d path=%s sent=%s",
+            args=(20, "gemini", "true"),
+            exc_info=None,
+        )
+        flt.filter(record)
+        # Must not raise TypeError - integer must stay integer
+        msg = record.getMessage()
+        self.assertEqual(msg, "RUN SUMMARY: rss_items=20 path=gemini sent=true")
+
+    def test_string_arg_with_token_is_redacted(self):
+        """String args that contain the token must be scrubbed."""
+        token = "222222222:AABBccDDeeFFggHHiiJJkkLLmmNNooP12345"
+        flt = SecretRedactingFilter(token)
+        record = logging.LogRecord(
+            name="t",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="sending to url %s",
+            args=(f"https://api.telegram.org/bot{token}/sendMessage",),
+            exc_info=None,
+        )
+        flt.filter(record)
+        msg = record.getMessage()
+        self.assertNotIn(token, msg)
+        self.assertIn("[REDACTED]", msg)
+
+    def test_token_in_message_string_is_redacted(self):
+        """Token embedded directly in record.msg (no args) must be scrubbed."""
+        token = "333333333:AABBccDDeeFFggHHiiJJkkLLmmNNooP12345"
+        flt = SecretRedactingFilter(token)
+        record = logging.LogRecord(
+            name="t",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg=f"token={token}",
+            args=None,
+            exc_info=None,
+        )
+        flt.filter(record)
+        self.assertNotIn(token, record.getMessage())
+        self.assertIn("[REDACTED]", record.getMessage())
+
+    def test_run_summary_emits_clean_info_line(self):
+        """When setup_logging is active, RUN SUMMARY must appear as clean INFO."""
+        token = "444444444:AABBccDDeeFFggHHiiJJkkLLmmNNooP12345"
+        setup_logging(level=logging.INFO, token=token)
+        logger = logging.getLogger("test.run_summary")
+        try:
+            with self.assertLogs("test.run_summary", level="INFO") as cm:
+                logger.info(
+                    "RUN SUMMARY: rss_items=%d path=%s sent=%s",
+                    42,
+                    "gemini",
+                    "true",
+                )
+            self.assertEqual(len(cm.output), 1)
+            self.assertIn("RUN SUMMARY", cm.output[0])
+            self.assertIn("rss_items=42", cm.output[0])
+            self.assertIn("path=gemini", cm.output[0])
+            self.assertIn("sent=true", cm.output[0])
+        finally:
+            logging.getLogger().handlers.clear()
+
+    def test_non_string_args_types_unchanged(self):
+        """Filter must leave int, float args with their original types."""
+        token = "555555555:AABBccDDeeFFggHHiiJJkkLLmmNNooP12345"
+        flt = SecretRedactingFilter(token)
+        record = logging.LogRecord(
+            name="t",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="%d %.2f %s",
+            args=(7, 3.14, "hello"),
+            exc_info=None,
+        )
+        flt.filter(record)
+        assert isinstance(record.args, tuple)
+        self.assertIsInstance(record.args[0], int)
+        self.assertIsInstance(record.args[1], float)
+        self.assertIsInstance(record.args[2], str)

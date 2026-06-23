@@ -21,7 +21,14 @@ class SecretRedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
         record.msg = self._scrub(str(record.msg))
         if record.args:
-            record.args = tuple(self._scrub(str(a)) for a in record.args)
+            if isinstance(record.args, dict):
+                record.args = {
+                    k: self._scrub(v) if isinstance(v, str) else v for k, v in record.args.items()
+                }
+            else:
+                record.args = tuple(
+                    self._scrub(a) if isinstance(a, str) else a for a in record.args
+                )
         return True
 
     def _scrub(self, text: str) -> str:
