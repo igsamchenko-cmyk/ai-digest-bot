@@ -21,7 +21,7 @@ from ai_digest.sources.filters import AI_PATTERN, normalize_title
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
-_NOW = datetime(2026, 6, 21, 10, 0, tzinfo=timezone.utc)
+_NOW = datetime.now(timezone.utc)  # always fresh — avoids lookback-window time-bomb
 
 RSS_SINGLE = b"""<?xml version="1.0"?>
 <rss><channel>
