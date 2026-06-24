@@ -60,8 +60,26 @@ def build_gemini_prompt_from_rss(
         + nl
         + "Translate titles to Ukrainian and write concise summaries in Ukrainian."
         + nl
+        + "STRICT CONTENT RULES — you MUST follow these without exception:"
+        + nl
+        + "- Use only information visible in the provided RSS title, source, date, and id."
+        + nl
+        + "- Do not invent facts, numbers, dates, quotes, product names, benchmarks,"
+        " funding amounts, or claims that are not present in the input."
+        + nl
+        + "- If the title is vague or lacks detail, write a cautious summary"
+        " without adding specifics."
+        + nl
+        + "- Keep summary concise (2-3 sentences). Do not pad with filler claims."
+        + nl
+        + "- Keep why_matters grounded and avoid hype or exaggerated significance."
+        + nl
+        + "- Never create, modify, or generate any URLs."
+        + nl
+        + "- Return valid JSON only."
+        + nl
         + 'Return ONLY valid JSON (no markdown). The "id" field MUST be the exact'
-        " number of the item in the list below — never invent it:"
+        + " number of the item in the list below — never invent it:"
         + nl
         + '{"summary":"2-3 sentence overview in Ukrainian","news":['
         + nl
