@@ -118,3 +118,15 @@ NEWS_LOOKBACK_HOURS=72
 ```
 
 Пошук пріоритезує релізи моделей, оновлення LLM, конкурентні запуски та важливі AI-продукти від OpenAI, Anthropic/Claude, Google/Gemini, Meta/Llama, Mistral, DeepSeek, Qwen, xAI/Grok, Microsoft і Perplexity.
+
+---
+
+## РљС–Р»СЊРєС–СЃС‚СЊ РЅРѕРІРёРЅ Сѓ РґР°Р№РґР¶РµСЃС‚С–
+
+| Р РµР¶РёРј | Р—РјС–РЅРЅР° | Default | РћРїРёСЃ |
+|-------|--------|---------|------|
+| Gemini path | `NEWS_COUNT` | 10 | AI-curated РґР°Р№РґР¶РµСЃС‚ Р· summary С‚Р° "why matters" |
+| RSS fallback | `RSS_FALLBACK_NEWS_COUNT` | 10 | Р РµР·РµСЂРІРЅРёР№ СЂРµР¶РёРј: Р·Р°РіРѕР»РѕРІРєРё + РїРѕСЃРёР»Р°РЅРЅСЏ Р±РµР· AI |
+
+> `rss_items=N` Сѓ СЂСЏРґРєСѓ `RUN SUMMARY` вЂ” С†Рµ СЃРёСЂС– items Сѓ pipeline (`NEWS_COUNT x 4`),
+> Р° **РЅРµ** РєС–Р»СЊРєС–СЃС‚СЊ РЅРѕРІРёРЅ, РІС–РґРїСЂР°РІР»РµРЅРёС… Сѓ Telegram.

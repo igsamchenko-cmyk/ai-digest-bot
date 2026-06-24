@@ -41,6 +41,7 @@ class AppConfig:
     target_kyiv_hour_start: int
     target_kyiv_hour_end: int
     send_time: str
+    rss_fallback_news_count: int = 10
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -49,11 +50,15 @@ class AppConfig:
         start = int(
             os.environ.get("TARGET_KYIV_HOUR_START", os.environ.get("TARGET_KYIV_HOUR", "8"))
         )
+        news_count = int(os.environ.get("NEWS_COUNT", "10"))
+        rss_fallback_news_count = int(
+            os.environ.get("RSS_FALLBACK_NEWS_COUNT", str(news_count))
+        )
         return cls(
             telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
             gemini_api_key=gemini_api_key,
-            news_count=int(os.environ.get("NEWS_COUNT", "5")),
+            news_count=news_count,
             news_lookback_hours=int(os.environ.get("NEWS_LOOKBACK_HOURS", "72")),
             gemini_model=os.environ.get("GEMINI_MODEL", "").strip(),
             send_marker_path=os.environ.get("SEND_MARKER_PATH", ".digest_last_sent"),
@@ -61,4 +66,5 @@ class AppConfig:
             target_kyiv_hour_start=start,
             target_kyiv_hour_end=int(os.environ.get("TARGET_KYIV_HOUR_END", str(start + 1))),
             send_time=os.environ.get("SEND_TIME", "08:00"),
+            rss_fallback_news_count=rss_fallback_news_count,
         )

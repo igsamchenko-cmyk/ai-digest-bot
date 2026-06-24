@@ -161,7 +161,7 @@ class DigestService:
                 _summary("empty", True)
                 return
             send_telegram(
-                build_rss_message(items, today_uk, news_count=cfg.news_count),
+                build_rss_message(items, today_uk, news_count=cfg.rss_fallback_news_count),
                 token=cfg.telegram_bot_token,
                 chat_id=cfg.telegram_chat_id,
             )
