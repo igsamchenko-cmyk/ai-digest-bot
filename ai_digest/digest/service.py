@@ -18,7 +18,7 @@ from datetime import datetime
 from google import genai
 
 from ai_digest.ai.gemini_client import gemini_call
-from ai_digest.ai.parser import attach_links, parse_gemini_response
+from ai_digest.ai.parser import attach_links, parse_gemini_response, sort_news_by_importance
 from ai_digest.ai.prompts import build_gemini_prompt_from_rss
 from ai_digest.config import AppConfig
 from ai_digest.sources.collector import get_rss_news
@@ -164,6 +164,7 @@ class DigestService:
                     model_override=cfg.gemini_model,
                 )
                 data = attach_links(parse_gemini_response(resp.text), items)
+                data["news"] = sort_news_by_importance(data["news"])
                 send_telegram(
                     build_gemini_message(data, today_uk),
                     token=cfg.telegram_bot_token,

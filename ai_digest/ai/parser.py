@@ -44,3 +44,18 @@ def attach_links(data: dict, items: list[dict]) -> dict:
         raise RuntimeError("Gemini response had no valid item ids")
     data["news"] = enriched
     return data
+
+
+_IMPORTANCE_RANK: dict[str, int] = {"high": 0, "medium": 1, "low": 2}
+
+
+def sort_news_by_importance(news: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Return a stable-sorted copy of *news* with high → medium → low → unknown.
+
+    The original list is not mutated.  Items with an unrecognised or missing
+    ``importance`` value are placed after low-importance items.
+    """
+    return sorted(
+        news,
+        key=lambda item: _IMPORTANCE_RANK.get(str(item.get("importance", "")), 3),
+    )
