@@ -136,9 +136,7 @@ class TestRssFallbackPassesOwnCount(unittest.TestCase):
             patch("ai_digest.digest.service.get_rss_news", return_value=self._SAMPLE_ITEMS),
             patch("ai_digest.digest.service.send_telegram"),
             patch.object(svc, "mark_sent_if_enforcing"),
-            patch(
-                "ai_digest.digest.service.build_rss_message", return_value="msg"
-            ) as mock_build,
+            patch("ai_digest.digest.service.build_rss_message", return_value="msg") as mock_build,
         ):
             svc.run()
 

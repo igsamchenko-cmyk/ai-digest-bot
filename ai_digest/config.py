@@ -51,9 +51,7 @@ class AppConfig:
             os.environ.get("TARGET_KYIV_HOUR_START", os.environ.get("TARGET_KYIV_HOUR", "8"))
         )
         news_count = int(os.environ.get("NEWS_COUNT", "10"))
-        rss_fallback_news_count = int(
-            os.environ.get("RSS_FALLBACK_NEWS_COUNT", str(news_count))
-        )
+        rss_fallback_news_count = int(os.environ.get("RSS_FALLBACK_NEWS_COUNT", str(news_count)))
         return cls(
             telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
