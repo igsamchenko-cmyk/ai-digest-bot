@@ -6,8 +6,8 @@ on:
   schedule:
     # Кілька спроб у ранковому вікні, рознесені з нульової хвилини (вона найзавантаженіша
     # на GitHub Actions і дає найбільші затримки). Літо (UTC+3): 05:xx UTC = 08:xx Київ;
-        - cron: '7,17,27,37,47,57 5,6,7,8,9,10 * * *'
-    
+    - cron: '7,17,27,37,47,57 5,6,7,8,9,10 * * *'
+
   workflow_dispatch:
 
 # Якщо кілька ранкових запусків накладаються (через затримки), виконуємо їх по черзі,
@@ -59,6 +59,14 @@ jobs:
           ENFORCE_KYIV_HOUR: ${{ github.event_name == 'schedule' }}
           TARGET_KYIV_HOUR_START: '8'
           TARGET_KYIV_HOUR_END: '13'
+
+      - name: Upload run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-summary
+          path: run_summary.json
+          if-no-files-found: warn
 
       # Гарантуємо, що файл існує (інакше крок збереження кешу впаде на першому запуску).
       - name: Ensure marker file exists
