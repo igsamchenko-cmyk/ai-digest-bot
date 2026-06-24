@@ -10,7 +10,9 @@ class is easy to unit-test with standard mock.patch.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 from datetime import datetime
 
 from google import genai
@@ -88,15 +90,42 @@ class DigestService:
         """Execute one full digest cycle."""
         cfg = self._cfg
         now = datetime.now(KYIV_TZ)
+        start_time = time.monotonic()
 
-        def _summary(path: str, sent: bool) -> None:
-            """Emit exactly one structured end-of-run line."""
+        def _summary(
+            path: str,
+            sent: bool,
+            selected: int = 0,
+            error_type: str = "",
+        ) -> None:
+            """Emit one structured end-of-run line and write run_summary.json."""
+            duration_ms = round((time.monotonic() - start_time) * 1000)
+            model = cfg.gemini_model or ""
             logger.info(
-                "RUN SUMMARY: rss_items=%d path=%s sent=%s",
+                "RUN SUMMARY: rss_items=%d selected=%d path=%s sent=%s"
+                " duration_ms=%d error_type=%s model=%s",
                 len(items),
+                selected,
                 path,
                 "true" if sent else "false",
+                duration_ms,
+                error_type,
+                model,
             )
+            summary_dict: dict = {
+                "rss_items": len(items),
+                "path": path,
+                "sent": sent,
+                "selected": selected,
+                "duration_ms": duration_ms,
+                "error_type": error_type,
+                "model": model,
+            }
+            try:
+                with open("run_summary.json", "w", encoding="utf-8") as fh:
+                    json.dump(summary_dict, fh, indent=2)
+            except OSError as exc:
+                logger.warning("Failed to write run_summary.json: %s", exc)
 
         items: list[dict] = []
         if self.should_skip_scheduled_run(now):
@@ -142,7 +171,7 @@ class DigestService:
                 )
                 self.mark_sent_if_enforcing(now)
                 logger.info("Done via Gemini!")
-                _summary("gemini", True)
+                _summary("gemini", True, selected=len(data["news"]))
                 return
             except Exception as exc:
                 logger.error("Gemini execution failed: %s. Falling back to RSS...", exc)
@@ -158,7 +187,7 @@ class DigestService:
                     chat_id=cfg.telegram_chat_id,
                 )
                 self.mark_sent_if_enforcing(now)
-                _summary("empty", True)
+                _summary("empty", True, selected=0)
                 return
             send_telegram(
                 build_rss_message(items, today_uk, news_count=cfg.rss_fallback_news_count),
@@ -167,10 +196,10 @@ class DigestService:
             )
             self.mark_sent_if_enforcing(now)
             logger.info("Done via Fallback RSS!")
-            _summary("rss", True)
+            _summary("rss", True, selected=min(len(items), cfg.rss_fallback_news_count))
         except Exception as err:
             logger.error("Fallback also failed: %s: %s", type(err).__name__, err)
-            _summary("error", False)
+            _summary("error", False, error_type=type(err).__name__)
             try:
                 send_telegram(
                     "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS.",
