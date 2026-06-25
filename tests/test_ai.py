@@ -414,7 +414,6 @@ class TestGeminiCall(unittest.TestCase):
                 gemini_call(client, "p", max_retries=3)
 
 
-
 # ─── prompt safety rules ──────────────────────────────────────────────────────
 
 
@@ -462,6 +461,7 @@ class TestPromptSafetyRules(unittest.TestCase):
     def test_prompt_instructs_grounded_why_matters(self):
         self.assertIn("why_matters", self.prompt)
         self.assertIn("grounded", self.prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
