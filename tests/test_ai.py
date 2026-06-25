@@ -414,5 +414,54 @@ class TestGeminiCall(unittest.TestCase):
                 gemini_call(client, "p", max_retries=3)
 
 
+# ─── prompt safety rules ──────────────────────────────────────────────────────
+
+
+class TestPromptSafetyRules(unittest.TestCase):
+    """Verify that conservative generation rules are present in the prompt."""
+
+    def setUp(self):
+        items = _items("Some vague AI headline")
+        self.prompt = build_gemini_prompt_from_rss(
+            items,
+            today_en="June 24, 2026",
+            nl=_NL,
+        )
+
+    def test_prompt_forbids_inventing_facts(self):
+        self.assertIn("Do not invent facts", self.prompt)
+
+    def test_prompt_forbids_invented_numbers_dates_quotes(self):
+        # All of these must be listed in the no-invent rule
+        for term in ("numbers", "dates", "quotes"):
+            with self.subTest(term=term):
+                self.assertIn(term, self.prompt)
+
+    def test_prompt_forbids_invented_product_names_benchmarks_funding(self):
+        for term in ("product names", "benchmarks", "funding amounts"):
+            with self.subTest(term=term):
+                self.assertIn(term, self.prompt)
+
+    def test_prompt_requires_valid_json_output(self):
+        self.assertIn("Return valid JSON only", self.prompt)
+
+    def test_prompt_instructs_caution_on_vague_titles(self):
+        self.assertIn("vague", self.prompt)
+
+    def test_prompt_forbids_url_generation(self):
+        self.assertIn("Never create", self.prompt)
+        # Ensure URL-related instruction is present
+        self.assertIn("URLs", self.prompt)
+
+    def test_prompt_does_not_contain_rss_item_links(self):
+        """KEY INVARIANT preserved: no real URLs from items appear in prompt."""
+        item = _items("Some vague AI headline")[0]
+        self.assertNotIn(item["link"], self.prompt)
+
+    def test_prompt_instructs_grounded_why_matters(self):
+        self.assertIn("why_matters", self.prompt)
+        self.assertIn("grounded", self.prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
