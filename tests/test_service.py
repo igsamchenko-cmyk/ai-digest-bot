@@ -32,6 +32,8 @@ def _cfg(
     target_kyiv_hour_start: int = 8,
     target_kyiv_hour_end: int = 9,
     send_time: str = "08:00",
+    use_gemini: bool = True,
+    rss_fallback_news_count: int = 10,
 ) -> AppConfig:
     """Build an AppConfig suitable for unit tests."""
     return AppConfig(
@@ -46,6 +48,8 @@ def _cfg(
         target_kyiv_hour_start=target_kyiv_hour_start,
         target_kyiv_hour_end=target_kyiv_hour_end,
         send_time=send_time,
+        use_gemini=use_gemini,
+        rss_fallback_news_count=rss_fallback_news_count,
     )
 
 
@@ -216,6 +220,55 @@ class TestDigestServiceGeminiFallback(unittest.TestCase):
             svc.run()
 
         self.assertEqual(mock_send.call_count, 1)
+
+
+class TestDigestServiceRssOnlyMode(unittest.TestCase):
+    """When USE_GEMINI=false, service sends RSS directly without AI helpers."""
+
+    def test_use_gemini_false_sends_rss_without_gemini_calls(self):
+        cfg = _cfg(use_gemini=False, rss_fallback_news_count=1)
+        svc = DigestService(cfg)
+
+        with (
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=_SAMPLE_ITEMS),
+            patch("ai_digest.digest.service.genai") as mock_genai,
+            patch("ai_digest.digest.service.gemini_call") as mock_gemini,
+            patch("ai_digest.digest.service.parse_gemini_response") as mock_parse,
+            patch("ai_digest.digest.service.attach_links") as mock_attach,
+            patch("ai_digest.digest.service.sort_news_by_importance") as mock_sort,
+            patch("ai_digest.digest.service.build_gemini_message") as mock_gemini_message,
+            patch(
+                "ai_digest.digest.service.build_rss_message", return_value="rss msg"
+            ) as mock_rss_message,
+            patch("ai_digest.digest.service.send_telegram") as mock_send,
+            patch.object(svc, "mark_sent_if_enforcing"),
+            self.assertLogs("ai_digest.digest.service", level="INFO") as cm,
+        ):
+            svc.run()
+
+        mock_genai.Client.assert_not_called()
+        mock_gemini.assert_not_called()
+        mock_parse.assert_not_called()
+        mock_attach.assert_not_called()
+        mock_sort.assert_not_called()
+        mock_gemini_message.assert_not_called()
+        mock_rss_message.assert_called_once()
+        _args, kwargs = mock_rss_message.call_args
+        self.assertEqual(kwargs.get("news_count"), 1)
+        mock_send.assert_called_once_with(
+            "rss msg",
+            token=cfg.telegram_bot_token,
+            chat_id=cfg.telegram_chat_id,
+        )
+
+        lines = [line for line in cm.output if "RUN SUMMARY" in line]
+        self.assertTrue(lines)
+        self.assertIn("path=rss", lines[-1])
+        self.assertIn("sent=true", lines[-1])
+        self.assertIn("selected=1", lines[-1])
+        self.assertIn("gemini_enabled=false", lines[-1])
+        self.assertIn("fallback_reason=gemini_disabled", lines[-1])
 
 
 class TestDigestServiceMarkerSkip(unittest.TestCase):

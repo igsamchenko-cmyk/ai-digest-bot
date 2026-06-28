@@ -9,6 +9,19 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a permissive boolean env var, falling back to default if unset/unknown."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    return default
+
+
 def _load_env_from_file() -> None:
     """Load .env file into os.environ (skips already-set keys)."""
     try:
@@ -41,6 +54,7 @@ class AppConfig:
     target_kyiv_hour_start: int
     target_kyiv_hour_end: int
     send_time: str
+    use_gemini: bool = True
     rss_fallback_news_count: int = 10
 
     @classmethod
@@ -64,5 +78,6 @@ class AppConfig:
             target_kyiv_hour_start=start,
             target_kyiv_hour_end=int(os.environ.get("TARGET_KYIV_HOUR_END", str(start + 1))),
             send_time=os.environ.get("SEND_TIME", "08:00"),
+            use_gemini=_env_bool("USE_GEMINI", True),
             rss_fallback_news_count=rss_fallback_news_count,
         )

@@ -29,7 +29,7 @@ class TestAppConfigNewsCountDefaults(unittest.TestCase):
         base = {
             k: v
             for k, v in os.environ.items()
-            if k not in ("NEWS_COUNT", "RSS_FALLBACK_NEWS_COUNT")
+            if k not in ("NEWS_COUNT", "RSS_FALLBACK_NEWS_COUNT", "USE_GEMINI")
         }
         base.update(overrides)
         with patch.dict("os.environ", base, clear=True):
@@ -38,6 +38,22 @@ class TestAppConfigNewsCountDefaults(unittest.TestCase):
     def test_news_count_default_is_10(self) -> None:
         cfg = self._from_env()
         self.assertEqual(cfg.news_count, 10)
+
+    def test_use_gemini_default_is_true(self) -> None:
+        cfg = self._from_env()
+        self.assertIs(cfg.use_gemini, True)
+
+    def test_use_gemini_false_values(self) -> None:
+        for value in ("false", "0", "no", "off"):
+            with self.subTest(value=value):
+                cfg = self._from_env(USE_GEMINI=value)
+                self.assertIs(cfg.use_gemini, False)
+
+    def test_use_gemini_true_values(self) -> None:
+        for value in ("true", "1", "yes", "on"):
+            with self.subTest(value=value):
+                cfg = self._from_env(USE_GEMINI=value)
+                self.assertIs(cfg.use_gemini, True)
 
     def test_rss_fallback_default_is_10(self) -> None:
         cfg = self._from_env()

@@ -89,6 +89,7 @@ class DigestService:
     def run(self) -> None:
         """Execute one full digest cycle."""
         cfg = self._cfg
+        gemini_enabled = getattr(cfg, "use_gemini", True) is not False
         now = datetime.now(KYIV_TZ)
         start_time = time.monotonic()
 
@@ -97,13 +98,15 @@ class DigestService:
             sent: bool,
             selected: int = 0,
             error_type: str = "",
+            fallback_reason: str = "",
         ) -> None:
             """Emit one structured end-of-run line and write run_summary.json."""
             duration_ms = round((time.monotonic() - start_time) * 1000)
             model = cfg.gemini_model or ""
             logger.info(
                 "RUN SUMMARY: rss_items=%d selected=%d path=%s sent=%s"
-                " duration_ms=%d error_type=%s model=%s",
+                " duration_ms=%d error_type=%s model=%s gemini_enabled=%s"
+                " fallback_reason=%s",
                 len(items),
                 selected,
                 path,
@@ -111,6 +114,8 @@ class DigestService:
                 duration_ms,
                 error_type,
                 model,
+                "true" if gemini_enabled else "false",
+                fallback_reason,
             )
             summary_dict: dict = {
                 "rss_items": len(items),
@@ -120,6 +125,8 @@ class DigestService:
                 "duration_ms": duration_ms,
                 "error_type": error_type,
                 "model": model,
+                "gemini_enabled": gemini_enabled,
+                "fallback_reason": fallback_reason,
             }
             try:
                 with open("run_summary.json", "w", encoding="utf-8") as fh:
@@ -145,8 +152,12 @@ class DigestService:
         except Exception as exc:
             logger.error("RSS fetch failed: %s", exc)
 
+        fallback_reason = "gemini_disabled" if not gemini_enabled else ""
+
         # ── 2. Try Gemini path ────────────────────────────────────────────────
-        if not cfg.gemini_api_key:
+        if not gemini_enabled:
+            logger.info("USE_GEMINI=false. Using RSS-only digest mode.")
+        elif not cfg.gemini_api_key:
             logger.info("GEMINI_API_KEY is not set. Using RSS fallback.")
         elif items:
             try:
@@ -188,7 +199,7 @@ class DigestService:
                     chat_id=cfg.telegram_chat_id,
                 )
                 self.mark_sent_if_enforcing(now)
-                _summary("empty", True, selected=0)
+                _summary("empty", True, selected=0, fallback_reason=fallback_reason)
                 return
             send_telegram(
                 build_rss_message(items, today_uk, news_count=cfg.rss_fallback_news_count),
@@ -197,10 +208,15 @@ class DigestService:
             )
             self.mark_sent_if_enforcing(now)
             logger.info("Done via Fallback RSS!")
-            _summary("rss", True, selected=min(len(items), cfg.rss_fallback_news_count))
+            _summary(
+                "rss",
+                True,
+                selected=min(len(items), cfg.rss_fallback_news_count),
+                fallback_reason=fallback_reason,
+            )
         except Exception as err:
             logger.error("Fallback also failed: %s: %s", type(err).__name__, err)
-            _summary("error", False, error_type=type(err).__name__)
+            _summary("error", False, error_type=type(err).__name__, fallback_reason=fallback_reason)
             try:
                 send_telegram(
                     "⚠️ <b>Помилка:</b> Не вдалося завантажити новини ні через Gemini, ні через RSS.",
