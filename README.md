@@ -130,3 +130,15 @@ NEWS_LOOKBACK_HOURS=72
 
 > `rss_items=N` Сѓ СЂСЏРґРєСѓ `RUN SUMMARY` вЂ” С†Рµ СЃРёСЂС– items Сѓ pipeline (`NEWS_COUNT x 4`),
 > Р° **РЅРµ** РєС–Р»СЊРєС–СЃС‚СЊ РЅРѕРІРёРЅ, РІС–РґРїСЂР°РІР»РµРЅРёС… Сѓ Telegram.
+
+### RSS-only mode
+
+By default the bot tries Gemini first and falls back to RSS if Gemini is unavailable.
+
+Set:
+
+```env
+USE_GEMINI=false
+```
+
+to skip Gemini entirely and send the RSS-only digest directly. This is useful when Gemini is unstable or quota-limited. RSS-only still sends `RSS_FALLBACK_NEWS_COUNT` items.
