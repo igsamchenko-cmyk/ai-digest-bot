@@ -33,6 +33,7 @@ def _cfg(
     target_kyiv_hour_start: int = 8,
     target_kyiv_hour_end: int = 9,
     send_time: str = "08:00",
+    use_gemini: bool = True,
     rss_fallback_news_count: int = 3,
 ) -> AppConfig:
     return AppConfig(
@@ -47,6 +48,7 @@ def _cfg(
         target_kyiv_hour_start=target_kyiv_hour_start,
         target_kyiv_hour_end=target_kyiv_hour_end,
         send_time=send_time,
+        use_gemini=use_gemini,
         rss_fallback_news_count=rss_fallback_news_count,
     )
 
@@ -148,6 +150,8 @@ class TestRunSummaryGeminiPath(unittest.TestCase):
         self.assertIn("rss_items", data)
         self.assertIn("error_type", data)
         self.assertIn("model", data)
+        self.assertTrue(data["gemini_enabled"])
+        self.assertEqual(data["fallback_reason"], "")
 
 
 class TestRunSummaryRssPath(unittest.TestCase):
@@ -177,6 +181,8 @@ class TestRunSummaryRssPath(unittest.TestCase):
         self.assertEqual(data["path"], "rss")
         self.assertTrue(data["sent"])
         self.assertEqual(data["selected"], 2)
+        self.assertTrue(data["gemini_enabled"])
+        self.assertEqual(data["fallback_reason"], "")
 
     def test_rss_path_log(self):
         cfg = _cfg(rss_fallback_news_count=2)
@@ -195,6 +201,37 @@ class TestRunSummaryRssPath(unittest.TestCase):
         self.assertTrue(lines)
         self.assertIn("path=rss", lines[-1])
         self.assertIn("sent=true", lines[-1])
+
+
+class TestRunSummaryRssOnlyPath(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._orig = os.getcwd()
+        os.chdir(self._tmpdir)
+
+    def tearDown(self):
+        os.chdir(self._orig)
+
+    def test_rss_only_json_marks_gemini_disabled(self):
+        cfg = _cfg(use_gemini=False, rss_fallback_news_count=2)
+        svc = DigestService(cfg)
+        with (
+            patch.object(svc, "should_skip_scheduled_run", return_value=False),
+            patch("ai_digest.digest.service.get_rss_news", return_value=_SAMPLE_ITEMS),
+            patch("ai_digest.digest.service.gemini_call") as mock_gemini,
+            patch("ai_digest.digest.service.send_telegram"),
+            patch.object(svc, "mark_sent_if_enforcing"),
+        ):
+            svc.run()
+        mock_gemini.assert_not_called()
+        self.assertTrue(os.path.exists("run_summary.json"))
+        with open("run_summary.json", encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(data["path"], "rss")
+        self.assertTrue(data["sent"])
+        self.assertEqual(data["selected"], 2)
+        self.assertFalse(data["gemini_enabled"])
+        self.assertEqual(data["fallback_reason"], "gemini_disabled")
 
 
 class TestRunSummarySkippedPath(unittest.TestCase):
